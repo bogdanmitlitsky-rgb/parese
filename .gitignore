@@ -1,0 +1,31 @@
+.vs/
+bin/
+obj/
+publish/
+net8.0-windows/
+
+*.user
+*.suo
+*.zip
+*.log
+logs/
+log.txt
+logs.txt
+mock.json
+competitors/
+
+# Local runtime secrets/config
+appsettings.json
+credentialsServiceAccount.json
+proxy_default.txt
+proxy_aks.txt
+
+# Build outputs inside the WPF project
+Hotline-Main-Parsing/bin/
+Hotline-Main-Parsing/obj/
+Hotline-Main-Parsing/logs/
+Hotline-Main-Parsing/competitors/
+Hotline-Main-Parsing/appsettings.json
+Hotline-Main-Parsing/credentialsServiceAccount.json
+Hotline-Main-Parsing/proxy_default.txt
+Hotline-Main-Parsing/proxy_aks.txt

@@ -1,0 +1,113 @@
+<Window x:Class="Hotline_Main_Parsing.CompetitorsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Конкуренты"
+        Height="650"
+        Width="1120"
+        MinHeight="520"
+        MinWidth="920"
+        Icon="parser-logo.ico"
+        WindowStartupLocation="CenterOwner"
+        Background="#F3F6FB"
+        FontFamily="Segoe UI">
+    <Window.Resources>
+        <SolidColorBrush x:Key="PanelBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="InkBrush" Color="#152032" />
+        <SolidColorBrush x:Key="MutedBrush" Color="#6B7688" />
+        <SolidColorBrush x:Key="LineBrush" Color="#D9E2EF" />
+        <SolidColorBrush x:Key="PrimaryBrush" Color="#2563EB" />
+
+        <Style TargetType="Button">
+            <Setter Property="Height" Value="38" />
+            <Setter Property="Padding" Value="18,0" />
+            <Setter Property="Cursor" Value="Hand" />
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Foreground" Value="#FFFFFF" />
+            <Setter Property="Background" Value="{StaticResource PrimaryBrush}" />
+            <Setter Property="BorderBrush" Value="{StaticResource PrimaryBrush}" />
+            <Setter Property="BorderThickness" Value="1" />
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="22">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel>
+                <TextBlock Text="Мини-CRM конкурентов"
+                           FontSize="24"
+                           FontWeight="Bold"
+                           Foreground="{StaticResource InkBrush}" />
+                <TextBlock x:Name="SummaryText"
+                           Text="Данных пока нет"
+                           Foreground="{StaticResource MutedBrush}"
+                           Margin="0,6,0,0" />
+            </StackPanel>
+
+            <Button Grid.Column="1"
+                    Content="Обновить"
+                    Width="120"
+                    Click="Reload_Click" />
+            <Button Grid.Column="3"
+                    Content="Открыть папку"
+                    Width="140"
+                    Click="OpenFolder_Click" />
+        </Grid>
+
+        <Border Grid.Row="1"
+                Background="#F8FAFC"
+                BorderBrush="{StaticResource LineBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="12"
+                Margin="0,18,0,14">
+            <TextBlock Text="Здесь показана последняя сохраненная картина по конкурентам: демпинг, минимальная рыночная цена, разница с твоей ценой и товары, где можно поднять цену."
+                       Foreground="{StaticResource MutedBrush}"
+                       TextWrapping="Wrap" />
+        </Border>
+
+        <Border Grid.Row="2"
+                Background="{StaticResource PanelBrush}"
+                BorderBrush="{StaticResource LineBrush}"
+                BorderThickness="1"
+                CornerRadius="8">
+            <DataGrid x:Name="CompetitorsGrid"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      CanUserAddRows="False"
+                      CanUserDeleteRows="False"
+                      GridLinesVisibility="Horizontal"
+                      HeadersVisibility="Column"
+                      AlternatingRowBackground="#F8FAFC"
+                      BorderThickness="0"
+                      Margin="1">
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Раздел" Binding="{Binding Section}" Width="95" />
+                    <DataGridTextColumn Header="Товар" Binding="{Binding ProductName}" Width="2*" />
+                    <DataGridTextColumn Header="Твоя цена" Binding="{Binding OwnPrice, StringFormat={}{0:0}}" Width="95" />
+                    <DataGridTextColumn Header="Рынок" Binding="{Binding MarketPrice, StringFormat={}{0:0}}" Width="90" />
+                    <DataGridTextColumn Header="Разница %" Binding="{Binding DifferencePercent, StringFormat={}{0:0.##}}" Width="90" />
+                    <DataGridTextColumn Header="Мин. магазин" Binding="{Binding LowestShop}" Width="140" />
+                    <DataGridTextColumn Header="Мин. цена" Binding="{Binding LowestPrice, StringFormat={}{0:0}}" Width="90" />
+                    <DataGridCheckBoxColumn Header="Демпинг" Binding="{Binding IsDumping}" Width="75" />
+                    <DataGridTextColumn Header="Кто демпингует" Binding="{Binding DumpingShop}" Width="140" />
+                    <DataGridTextColumn Header="Демп. %" Binding="{Binding DumpingPercent, StringFormat={}{0:0.##}}" Width="80" />
+                    <DataGridCheckBoxColumn Header="Можно поднять" Binding="{Binding CanRaisePrice}" Width="105" />
+                    <DataGridTextColumn Header="Предл." Binding="{Binding OffersCount}" Width="65" />
+                    <DataGridTextColumn Header="Дата" Binding="{Binding CheckedAt, StringFormat={}{0:dd.MM HH:mm}}" Width="105" />
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+    </Grid>
+</Window>
