@@ -95,9 +95,7 @@ namespace Hotline_Main_Parsing.aks
 
             var values = _sheetsService.Spreadsheets.Values.Get(_hotlineSpreadSheetId, sheet.Properties.Title + "!B3:B").Execute();
 
-            var result = values.Values.Select(v => v[0]).Cast<string>().ToArray();
-
-            return result;
+            return ReadFirstColumn(values);
         }
 
         public string[] GetBitIdsOrder()
@@ -107,9 +105,7 @@ namespace Hotline_Main_Parsing.aks
 
             var values = _sheetsService.Spreadsheets.Values.Get(_bitSpreadSheetId, sheet.Properties.Title + "!Y2:Y").Execute();
 
-            var result = values.Values.Select(v => v[0]).Cast<string>().ToArray();
-
-            return result;
+            return ReadFirstColumn(values);
         }
 
         public Dictionary<string, decimal> GetCurrentBitPrices()
@@ -196,6 +192,11 @@ namespace Hotline_Main_Parsing.aks
             }
             var valueRange = new ValueRange();
             valueRange.Values = values;
+            if (values.Count == 0)
+            {
+                return;
+            }
+
             var range = $"{hotlineSheet.Properties.Title}!A3:AC{ids.Length + +2}";
             var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _hotlineSpreadSheetId, range);
 
@@ -237,6 +238,11 @@ namespace Hotline_Main_Parsing.aks
             }
             var valueRange = new ValueRange();
             valueRange.Values = values;
+            if (values.Count == 0)
+            {
+                return;
+            }
+
             var range = $"'{bitSheet.Properties.Title}'!I2:P{ids.Length + 1}";
             var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _bitSpreadSheetId, range);
             req.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
@@ -262,6 +268,15 @@ namespace Hotline_Main_Parsing.aks
             return count;
         }
 
+        private static string[] ReadFirstColumn(ValueRange values)
+        {
+            if (values.Values == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return values.Values.Select(v => v[0]).Cast<string>().ToArray();
+        }
 
     }
 }

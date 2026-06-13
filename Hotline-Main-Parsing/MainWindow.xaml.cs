@@ -1594,6 +1594,13 @@ namespace Hotline_Main_Parsing
                 // Этот код теперь должен выполниться без зависания
                 File.WriteAllText("mock.json", JsonConvert.SerializeObject(productsInSheet.ToList()));
                 AppendLog("Смартфоны: не обработано - " + (indexes.Count - productsInSheet.Count));
+                int changedPrices = productsInSheet.Count(product => IsReadyPriceChanged(product.Id, product.ReadyPrice, oldReadyPrices));
+                AddProcessedProducts(productsInSheet.Count);
+                AddChangedPrices(changedPrices);
+                stats.Processed = productsInSheet.Count;
+                stats.ChangedPrices = changedPrices;
+                stats.Elapsed = sw.Elapsed;
+                AppendLog($"Смартфоны: цен сменилось {changedPrices}");
 
                 // Очищаем оставшиеся в очереди браузеры
                 SetStage("смартфоны: закрываю браузеры");
@@ -1606,15 +1613,9 @@ namespace Hotline_Main_Parsing
                 spreadSheetManager.UploadDataToTables(productsInSheet);
                 CompetitorHistoryStore.SaveInsights(competitorInsights);
                 AppendLog($"Смартфоны: история конкурентов обновлена, записей: {competitorInsights.Count}");
-                int changedPrices = productsInSheet.Count(product => IsReadyPriceChanged(product.Id, product.ReadyPrice, oldReadyPrices));
-                AddProcessedProducts(productsInSheet.Count);
-                AddChangedPrices(changedPrices);
-                stats.Processed = productsInSheet.Count;
-                stats.ChangedPrices = changedPrices;
                 SetStage($"смартфоны: готово, обработано {productsInSheet.Count}");
                 sw.Stop();
                 stats.Elapsed = sw.Elapsed;
-                AppendLog($"Смартфоны: цен сменилось {changedPrices}");
                 AppendLog($"Смартфоны: время обработки {sw.Elapsed:hh\\:mm\\:ss}");
             }
             catch (Exception e)
@@ -2023,6 +2024,13 @@ namespace Hotline_Main_Parsing
 
                 File.WriteAllText("mock.json", JsonConvert.SerializeObject(productsInSheet.ToList()));
                 AppendLog("Аксессуары: не обработано - " + (indexes.Count - productsInSheet.Count));
+                int changedPrices = productsInSheet.Count(product => IsReadyPriceChanged(product.Id, product.ReadyPrice, oldReadyPricesAks));
+                AddProcessedProducts(productsInSheet.Count);
+                AddChangedPrices(changedPrices);
+                stats.Processed = productsInSheet.Count;
+                stats.ChangedPrices = changedPrices;
+                stats.Elapsed = sw.Elapsed;
+                AppendLog($"Аксессуары: цен сменилось {changedPrices}");
 
                 SetStage("аксессуары: закрываю браузеры");
                 foreach (var manager in managers)
@@ -2034,15 +2042,9 @@ namespace Hotline_Main_Parsing
                 spreadSheetManager.UploadDataToTables(productsInSheet.ToList()); // .ToList() нужен, если метод требует List, иначе можно передавать напрямую
                 CompetitorHistoryStore.SaveInsights(competitorInsights);
                 AppendLog($"Аксессуары: история конкурентов обновлена, записей: {competitorInsights.Count}");
-                int changedPrices = productsInSheet.Count(product => IsReadyPriceChanged(product.Id, product.ReadyPrice, oldReadyPricesAks));
-                AddProcessedProducts(productsInSheet.Count);
-                AddChangedPrices(changedPrices);
-                stats.Processed = productsInSheet.Count;
-                stats.ChangedPrices = changedPrices;
                 SetStage($"аксессуары: готово, обработано {productsInSheet.Count}");
                 sw.Stop();
                 stats.Elapsed = sw.Elapsed;
-                AppendLog($"Аксессуары: цен сменилось {changedPrices}");
                 AppendLog($"Аксессуары: время обработки {sw.Elapsed:hh\\:mm\\:ss}");
             }
             catch (Exception e)

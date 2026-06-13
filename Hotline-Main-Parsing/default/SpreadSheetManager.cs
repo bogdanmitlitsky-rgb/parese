@@ -214,9 +214,7 @@ namespace Hotline_Main_Parsing.@default
 
             var values = _sheetsService.Spreadsheets.Values.Get(_hotlineSpreadSheetId, sheet.Properties.Title + "!B3:B").Execute();
 
-            var result = values.Values.Select(v => v[0]).Cast<string>().ToArray();
-
-            return result;
+            return ReadFirstColumn(values);
         }
 
         public string[] GetIdsOrder(string name, string pathGoogleSheets, string key)
@@ -226,9 +224,7 @@ namespace Hotline_Main_Parsing.@default
 
             var values = _sheetsService.Spreadsheets.Values.Get(key, sheet.Properties.Title + pathGoogleSheets).Execute();
 
-            var result = values.Values.Select(v => v[0]).Cast<string>().ToArray();
-
-            return result;
+            return ReadFirstColumn(values);
         }
         public ValueRange GetHotlineEditorIdsOrder()
         {
@@ -248,9 +244,7 @@ namespace Hotline_Main_Parsing.@default
 
             var values = _sheetsService.Spreadsheets.Values.Get(_bitSpreadSheetId, sheet.Properties.Title + "!AB2:AB").Execute();
 
-            var result = values.Values.Select(v => v[0]).Cast<string>().ToArray();
-
-            return result;
+            return ReadFirstColumn(values);
         }
 
         public Dictionary<string, decimal> GetCurrentBitPrices()
@@ -330,6 +324,11 @@ namespace Hotline_Main_Parsing.@default
 
         private void UploadTable(List<IList<Object>> values, string range, string key, SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum options)
         {
+            if (values.Count == 0)
+            {
+                return;
+            }
+
             var valueRange = new ValueRange();
             valueRange.Values = values;
 
@@ -344,11 +343,12 @@ namespace Hotline_Main_Parsing.@default
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetIdsOrder("Export Products Sheet", "!Y:Y", _SmilePromSpreadSheetId);
             var idsEditor = GetHotlineEditorIdsOrder();
+            var editorRows = idsEditor.Values ?? Array.Empty<IList<object>>();
             var values = GetListObjects(38, ids.Length);
 
             for (int i = 0; i < ids.Length; i++)
             {
-                var kymId = idsEditor.Values.FirstOrDefault(x => x[16].ToString() == ids[i]);
+                var kymId = editorRows.FirstOrDefault(x => x[16].ToString() == ids[i]);
                 if (kymId == null) { continue; }
 
                 var row = values[i - 1];
@@ -368,11 +368,12 @@ namespace Hotline_Main_Parsing.@default
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetIdsOrder("Export Products Sheet", "!AC:AC", _StokPromSpreadSheetId);
             var idsEditor = GetHotlineEditorIdsOrder();
+            var editorRows = idsEditor.Values ?? Array.Empty<IList<object>>();
             var values = GetListObjects(42, ids.Length); 
 
             for (int i = 0; i < ids.Length; i++)
             {
-                var kymId = idsEditor.Values.FirstOrDefault(x => x[12].ToString() == ids[i]);
+                var kymId = editorRows.FirstOrDefault(x => x[12].ToString() == ids[i]);
                 if (kymId == null) { continue; }
 
                 var row = values[i - 1];
@@ -393,11 +394,12 @@ namespace Hotline_Main_Parsing.@default
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetIdsOrder("Export Products Sheet", "!AA:AA", _1UaPromSpreadSheetId);
             var idsEditor = GetHotlineEditorIdsOrder();
+            var editorRows = idsEditor.Values ?? Array.Empty<IList<object>>();
             var values = GetListObjects(42, ids.Length);
 
             for (int i = 0; i < ids.Length; i++)
             {
-                var kymId = idsEditor.Values.FirstOrDefault(x => x[3].ToString() == ids[i]);
+                var kymId = editorRows.FirstOrDefault(x => x[3].ToString() == ids[i]);
                 if (kymId == null) { continue; }
 
                 var row = values[i - 1];
@@ -417,11 +419,12 @@ namespace Hotline_Main_Parsing.@default
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetIdsOrder("Export Products Sheet", "!AB:AB", _kymPromSpreadSheetId);
             var idsEditor = GetHotlineEditorIdsOrder();
+            var editorRows = idsEditor.Values ?? Array.Empty<IList<object>>();
             var values = GetListObjects(39, ids.Length);
 
             for (int i = 0; i < ids.Length; i++)
             {
-                var kymId = idsEditor.Values.FirstOrDefault(x => x[8].ToString() == ids[i]);
+                var kymId = editorRows.FirstOrDefault(x => x[8].ToString() == ids[i]);
                 if(kymId == null) { continue; }
 
                 var row = values[i-1];
@@ -461,6 +464,16 @@ namespace Hotline_Main_Parsing.@default
         private static string GetCell(IList<object> row, int index)
         {
             return row.Count > index ? row[index]?.ToString()?.Trim() ?? "" : "";
+        }
+
+        private static string[] ReadFirstColumn(ValueRange values)
+        {
+            if (values.Values == null)
+            {
+                return Array.Empty<string>();
+            }
+
+            return values.Values.Select(v => v[0]).Cast<string>().ToArray();
         }
 
         private static decimal CalculateOrientirPrice(decimal optPrice, decimal markupPercent)
@@ -608,6 +621,10 @@ namespace Hotline_Main_Parsing.@default
             }
             var valueRange = new ValueRange();
             valueRange.Values = values;
+            if (values.Count == 0)
+            {
+                return;
+            }
 
 
             var range = $"{hotlineSheet.Properties.Title}!{_from}3:{_to + ids.Length + 2}";
@@ -651,6 +668,11 @@ namespace Hotline_Main_Parsing.@default
             }
             var valueRange = new ValueRange();
             valueRange.Values = values;
+            if (values.Count == 0)
+            {
+                return;
+            }
+
             var range = $"'{bitSheet.Properties.Title}'!I2:P{ids.Length + 1}";
             var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _bitSpreadSheetId, range);
             req.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;

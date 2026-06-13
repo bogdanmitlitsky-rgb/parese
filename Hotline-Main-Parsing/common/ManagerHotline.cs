@@ -13,7 +13,7 @@ namespace Hotline_Main_Parsing.common
         private static readonly TimeSpan BrowserStartTimeout = TimeSpan.FromSeconds(45);
         private static readonly TimeSpan PageStartTimeout = TimeSpan.FromSeconds(20);
         private static readonly TimeSpan UserAgentTimeout = TimeSpan.FromSeconds(10);
-        private const int PageLoadTimeoutMs = 180_000;
+        private const int PageLoadTimeoutMs = 200_000;
         private static readonly object ProcessRegistryLock = new();
         private static readonly string ProcessRegistryPath = Path.Combine(AppContext.BaseDirectory, "parser_chrome_pids.txt");
         private static readonly string BrowserProfileRoot = Path.Combine(Path.GetTempPath(), "HotlineParserChrome");
