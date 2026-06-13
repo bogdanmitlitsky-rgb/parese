@@ -13,6 +13,7 @@ namespace Hotline_Main_Parsing.common
         private static readonly TimeSpan BrowserStartTimeout = TimeSpan.FromSeconds(45);
         private static readonly TimeSpan PageStartTimeout = TimeSpan.FromSeconds(20);
         private static readonly TimeSpan UserAgentTimeout = TimeSpan.FromSeconds(10);
+        private const int PageLoadTimeoutMs = 180_000;
         private static readonly object ProcessRegistryLock = new();
         private static readonly string ProcessRegistryPath = Path.Combine(AppContext.BaseDirectory, "parser_chrome_pids.txt");
         private static readonly string BrowserProfileRoot = Path.Combine(Path.GetTempPath(), "HotlineParserChrome");
@@ -161,7 +162,7 @@ namespace Hotline_Main_Parsing.common
         public async Task<string> LoadHtmlPage(string url)
         {
 
-            var response = await _page.GoToAsync(url, timeout: 60_000);
+            var response = await _page.GoToAsync(url, timeout: PageLoadTimeoutMs);
             //await BypassCloudFlare(_page);
 
             if (response == null)
