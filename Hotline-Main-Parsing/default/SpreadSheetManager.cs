@@ -607,6 +607,11 @@ namespace Hotline_Main_Parsing.@default
 
                 var row = values[i];
                 row[resultIndex] = product.ReadyPrice;
+                if (product.SwitchParseMarkOldToNew)
+                {
+                    row[9] = false;
+                    row[10] = true;
+                }
                 row[CountPredloginiyIndex] = product.OffersCount;
                 if (product.TehnoBit != '\0') row[27] = product.TehnoBit is '+' ? "'" + product.TehnoBit : product.TehnoBit;
                 else row[27] = '-';

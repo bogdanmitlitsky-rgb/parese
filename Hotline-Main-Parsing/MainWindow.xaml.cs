@@ -575,6 +575,49 @@ namespace Hotline_Main_Parsing
             productInSheet.ReadyPrice = productInSheet.Price;
         }
 
+        private static bool SwitchParseMarkOldToNewIfNeeded(DefaultSheets.ProductInSheet productInSheet)
+        {
+            if (!ShouldSwitchParseMarkOldToNew(productInSheet.Price, productInSheet.ReadyPrice, productInSheet.PriceRange, productInSheet.ParseMarkOld, productInSheet.ParseMarkNew))
+            {
+                return false;
+            }
+
+            productInSheet.ParseMarkOld = false;
+            productInSheet.ParseMarkNew = true;
+            productInSheet.SwitchParseMarkOldToNew = true;
+            return true;
+        }
+
+        private static bool SwitchParseMarkOldToNewIfNeeded(Hotline_Main_Parsing.aks.ProductInSheet productInSheet)
+        {
+            if (!ShouldSwitchParseMarkOldToNew(productInSheet.Price, productInSheet.ReadyPrice, productInSheet.PriceRange, productInSheet.ParseMarkOld, productInSheet.ParseMarkNew))
+            {
+                return false;
+            }
+
+            productInSheet.ParseMarkOld = false;
+            productInSheet.ParseMarkNew = true;
+            productInSheet.SwitchParseMarkOldToNew = true;
+            return true;
+        }
+
+        private static bool ShouldSwitchParseMarkOldToNew(decimal orientirPrice, decimal readyPrice, decimal[] hotlinePrices, bool parseMarkOld, bool parseMarkNew)
+        {
+            if (!parseMarkOld || parseMarkNew || orientirPrice <= 0 || readyPrice <= 0 || hotlinePrices.Length == 0)
+            {
+                return false;
+            }
+
+            decimal roundedOrientir = Math.Round(orientirPrice, 0, MidpointRounding.AwayFromZero);
+            decimal roundedReady = Math.Round(readyPrice, 0, MidpointRounding.AwayFromZero);
+            if (roundedOrientir != roundedReady)
+            {
+                return false;
+            }
+
+            return hotlinePrices.Any(price => price > 0 && Math.Round(price, 0, MidpointRounding.AwayFromZero) < roundedReady);
+        }
+
         private void BeginRunLog()
         {
             Directory.CreateDirectory(GetLogsDirectory());
@@ -1323,6 +1366,7 @@ namespace Hotline_Main_Parsing
 
                 var productsInSheet = new ConcurrentBag<Hotline_Main_Parsing.@default.ProductInSheet>();
                 var competitorInsights = new ConcurrentBag<CompetitorInsight>();
+                int switchedParseMarks = 0;
 
                 // Читаем старые цены из таблиц для сохранения при пропуске
                 var oldReadyPrices = new Dictionary<string, decimal>();
@@ -1462,6 +1506,11 @@ namespace Hotline_Main_Parsing
                                 }
 
                                 Hotline_Main_Parsing.@default.PriceCalculator.CalculatePrices(productInSheet, antiDumping.ShopsForPrice, percent);
+                                if (SwitchParseMarkOldToNewIfNeeded(productInSheet))
+                                {
+                                    Interlocked.Increment(ref switchedParseMarks);
+                                }
+
                                 competitorInsights.Add(BuildCompetitorInsight(
                                     "Смартфоны",
                                     productId,
@@ -1601,6 +1650,10 @@ namespace Hotline_Main_Parsing
                 stats.ChangedPrices = changedPrices;
                 stats.Elapsed = sw.Elapsed;
                 AppendLog($"Смартфоны: цен сменилось {changedPrices}");
+                if (switchedParseMarks > 0)
+                {
+                    AppendLog($"Смартфоны: J -> K переключено: {switchedParseMarks}");
+                }
 
                 // Очищаем оставшиеся в очереди браузеры
                 SetStage("смартфоны: закрываю браузеры");
@@ -1766,6 +1819,7 @@ namespace Hotline_Main_Parsing
                 // ИСПОЛЬЗУЕМ ПОТОКОБЕЗОПАСНУЮ КОЛЛЕКЦИЮ ДЛЯ РЕЗУЛЬТАТОВ
                 var productsInSheet = new ConcurrentBag<Hotline_Main_Parsing.aks.ProductInSheet>();
                 var competitorInsights = new ConcurrentBag<CompetitorInsight>();
+                int switchedParseMarks = 0;
 
                 // Читаем старые цены из таблиц для сохранения при пропуске
                 var oldReadyPricesAks = new Dictionary<string, decimal>();
@@ -1907,6 +1961,11 @@ namespace Hotline_Main_Parsing
                                 }
 
                                 Hotline_Main_Parsing.aks.PriceCalculator.CalculatePrices(productInSheet, antiDumping.ShopsForPrice, percent);
+                                if (SwitchParseMarkOldToNewIfNeeded(productInSheet))
+                                {
+                                    Interlocked.Increment(ref switchedParseMarks);
+                                }
+
                                 competitorInsights.Add(BuildCompetitorInsight(
                                     "Аксессуары",
                                     productId,
@@ -2031,6 +2090,10 @@ namespace Hotline_Main_Parsing
                 stats.ChangedPrices = changedPrices;
                 stats.Elapsed = sw.Elapsed;
                 AppendLog($"Аксессуары: цен сменилось {changedPrices}");
+                if (switchedParseMarks > 0)
+                {
+                    AppendLog($"Аксессуары: J -> K переключено: {switchedParseMarks}");
+                }
 
                 SetStage("аксессуары: закрываю браузеры");
                 foreach (var manager in managers)

@@ -13,6 +13,7 @@
         public string? PriceColor { get; set; } = null;
         public string Url { get; set; } = default!;
         public bool ParseMarkOld { get; set; }
+        public bool SwitchParseMarkOldToNew { get; set; }
         public bool ParseMarkRRC { get; set; }
         public decimal? BuyPriceInDollars { get; set; }
         public decimal? BuyPriceInGRN { get; set; }

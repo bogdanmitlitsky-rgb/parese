@@ -19,6 +19,7 @@ namespace Hotline_Main_Parsing.@default
     public string? PriceColor { get; set; } = null;
     public string Url { get; set; } = default!;
     public bool ParseMarkOld { get; set; }
+    public bool SwitchParseMarkOldToNew { get; set; }
     public decimal? BuyPriceInDollars { get; set; }
     public decimal? BuyPriceInGRN { get; set; }
     public string? Availableness { get; set; } = null;

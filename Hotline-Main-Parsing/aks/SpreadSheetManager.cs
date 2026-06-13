@@ -179,6 +179,11 @@ namespace Hotline_Main_Parsing.aks
 
                 var row = values[i];
                 row[5] = product.ReadyPrice;
+                if (product.SwitchParseMarkOldToNew)
+                {
+                    row[9] = false;
+                    row[10] = true;
+                }
                 row[18] = product.OffersCount;
                 if (product.TehnoBit != '\0') row[27] = product.TehnoBit is '+' ? "'" + product.TehnoBit : product.TehnoBit;
                 else row[27] = '-';
