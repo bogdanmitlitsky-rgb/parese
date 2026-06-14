@@ -282,12 +282,11 @@ namespace Hotline_Main_Parsing.@default
         {
             var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
             bool mainWorking = Convert.ToBoolean(config["mainWorking"]);
-            bool aksWorking = Convert.ToBoolean(config["aksWorking"]);
 
             if (mainWorking)
                 UploadDataToHotline(products);
-            if (aksWorking)
-                UploadDataToBit(products);
+
+            UploadDataToBit(products);
 
             try
             {
