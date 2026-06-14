@@ -606,10 +606,6 @@ namespace Hotline_Main_Parsing.@default
 
                 var row = values[i];
                 row[resultIndex] = product.ReadyPrice;
-                if (!string.IsNullOrWhiteSpace(product.PriceAvailableness))
-                {
-                    row[7] = FormatAvailabilityForSheet(product.PriceAvailableness);
-                }
                 if (product.SwitchParseMarkOldToNew)
                 {
                     row[9] = false;

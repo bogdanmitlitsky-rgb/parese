@@ -179,10 +179,6 @@ namespace Hotline_Main_Parsing.aks
 
                 var row = values[i];
                 row[5] = product.ReadyPrice;
-                if (!string.IsNullOrWhiteSpace(product.PriceAvailableness))
-                {
-                    row[7] = FormatAvailabilityForSheet(product.PriceAvailableness);
-                }
                 if (product.SwitchParseMarkOldToNew)
                 {
                     row[9] = false;
