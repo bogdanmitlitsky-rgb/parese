@@ -1046,6 +1046,7 @@ namespace Hotline_Main_Parsing
             string section,
             string productId,
             string productName,
+            string hotlineUrl,
             decimal orientirPrice,
             decimal ownPrice,
             IReadOnlyList<Shop> shops,
@@ -1077,6 +1078,7 @@ namespace Hotline_Main_Parsing
                 Section = section,
                 ProductId = productId,
                 ProductName = productName,
+                HotlineUrl = hotlineUrl,
                 OrientirPrice = orientirPrice,
                 OwnPrice = ownPrice,
                 OffersCount = competitors.Count,
@@ -1469,6 +1471,7 @@ namespace Hotline_Main_Parsing
                                 }
 
                                 Product product = await ParseProduct(managerHotline, productInSheet.Url, "proxy_default.txt");
+                                productInSheet.PriceAvailableness = product.Shops.Count > 0 ? "+" : "-";
 
                                 if (product.Shops.Count == 0)
                                 {
@@ -1476,6 +1479,7 @@ namespace Hotline_Main_Parsing
                                         "Смартфоны",
                                         productId,
                                         productName,
+                                        productInSheet.Url,
                                         productInSheet.Price,
                                         productInSheet.ReadyPrice,
                                         product.Shops,
@@ -1515,6 +1519,7 @@ namespace Hotline_Main_Parsing
                                     "Смартфоны",
                                     productId,
                                     productName,
+                                    productInSheet.Url,
                                     productInSheet.Price,
                                     productInSheet.ReadyPrice,
                                     shops,
@@ -1597,7 +1602,7 @@ namespace Hotline_Main_Parsing
                         {
                             var fallback = new Hotline_Main_Parsing.@default.ProductInSheet();
                             fallback.Id = productId;
-                            fallback.PriceAvailableness = (string?)data.ElementAtOrDefault(7);
+                            fallback.PriceAvailableness = noOffers ? "-" : (string?)data.ElementAtOrDefault(7);
                             fallback.Url = GetHotlineUrl(data);
                             if (TryParseSheetPrice((string?)data.ElementAtOrDefault(dicSymbols[priceOrientir]), out decimal fp))
                                 fallback.Price = fp;
@@ -1926,6 +1931,7 @@ namespace Hotline_Main_Parsing
                                 }
 
                                 Hotline_Main_Parsing.common.Product product = await ParseProduct(managerHotline, productInSheet.Url, "proxy_aks.txt");
+                                productInSheet.PriceAvailableness = product.Shops.Count > 0 ? "+" : "-";
 
                                 if (product.Shops.Count == 0)
                                 {
@@ -1933,6 +1939,7 @@ namespace Hotline_Main_Parsing
                                         "Аксессуары",
                                         productId,
                                         productName,
+                                        productInSheet.Url,
                                         productInSheet.Price,
                                         productInSheet.ReadyPrice,
                                         product.Shops,
@@ -1970,6 +1977,7 @@ namespace Hotline_Main_Parsing
                                     "Аксессуары",
                                     productId,
                                     productName,
+                                    productInSheet.Url,
                                     productInSheet.Price,
                                     productInSheet.ReadyPrice,
                                     shops,
@@ -2025,7 +2033,7 @@ namespace Hotline_Main_Parsing
                         {
                             var fallback = new Hotline_Main_Parsing.aks.ProductInSheet();
                             fallback.Id = productId;
-                            fallback.PriceAvailableness = (string?)data.ElementAtOrDefault(7);
+                            fallback.PriceAvailableness = noOffers ? "-" : (string?)data.ElementAtOrDefault(7);
                             fallback.Url = GetHotlineUrl(data);
                             if (TryParseSheetPrice((string?)data.ElementAtOrDefault(dicSymbols[priceOrientir]), out decimal fp))
                                 fallback.Price = fp;

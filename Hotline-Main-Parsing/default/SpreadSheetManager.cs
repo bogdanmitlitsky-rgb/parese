@@ -607,6 +607,10 @@ namespace Hotline_Main_Parsing.@default
 
                 var row = values[i];
                 row[resultIndex] = product.ReadyPrice;
+                if (!string.IsNullOrWhiteSpace(product.PriceAvailableness))
+                {
+                    row[7] = FormatAvailabilityForSheet(product.PriceAvailableness);
+                }
                 if (product.SwitchParseMarkOldToNew)
                 {
                     row[9] = false;
@@ -665,10 +669,9 @@ namespace Hotline_Main_Parsing.@default
 
                 var row = values[i];
                 row[0] = product.BitPrice;
-                if (!string.IsNullOrEmpty(product.PriceAvailableness))
+                if (!string.IsNullOrWhiteSpace(product.PriceAvailableness))
                 {
-                    product.PriceAvailableness = "'" + product.PriceAvailableness;
-                    row[7] = product.PriceAvailableness;
+                    row[7] = FormatAvailabilityForSheet(product.PriceAvailableness);
                 }
             }
             var valueRange = new ValueRange();
@@ -682,6 +685,12 @@ namespace Hotline_Main_Parsing.@default
             var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _bitSpreadSheetId, range);
             req.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
             req.Execute();
+        }
+
+        private static string FormatAvailabilityForSheet(string availability)
+        {
+            string value = availability.Trim().TrimStart('\'');
+            return value == "+" ? "'+" : value;
         }
 
         private void ServiceInit()

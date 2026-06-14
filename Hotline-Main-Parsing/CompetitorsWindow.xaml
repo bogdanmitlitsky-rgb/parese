@@ -42,6 +42,8 @@
                 <ColumnDefinition Width="Auto" />
                 <ColumnDefinition Width="12" />
                 <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="Auto" />
             </Grid.ColumnDefinitions>
 
             <StackPanel>
@@ -56,10 +58,14 @@
             </StackPanel>
 
             <Button Grid.Column="1"
+                    Content="Отправить Excel в ТГ"
+                    Width="180"
+                    Click="SendExcelToTelegram_Click" />
+            <Button Grid.Column="3"
                     Content="Обновить"
                     Width="120"
                     Click="Reload_Click" />
-            <Button Grid.Column="3"
+            <Button Grid.Column="5"
                     Content="Открыть папку"
                     Width="140"
                     Click="OpenFolder_Click" />
@@ -95,6 +101,16 @@
                 <DataGrid.Columns>
                     <DataGridTextColumn Header="Раздел" Binding="{Binding Section}" Width="95" />
                     <DataGridTextColumn Header="Товар" Binding="{Binding ProductName}" Width="2*" />
+                    <DataGridHyperlinkColumn Header="Hotline"
+                                             Binding="{Binding HotlineUrl}"
+                                             ContentBinding="{Binding HotlineLinkLabel}"
+                                             Width="90">
+                        <DataGridHyperlinkColumn.ElementStyle>
+                            <Style TargetType="TextBlock">
+                                <EventSetter Event="Hyperlink.RequestNavigate" Handler="HotlineLink_RequestNavigate" />
+                            </Style>
+                        </DataGridHyperlinkColumn.ElementStyle>
+                    </DataGridHyperlinkColumn>
                     <DataGridTextColumn Header="Твоя цена" Binding="{Binding OwnPrice, StringFormat={}{0:0}}" Width="95" />
                     <DataGridTextColumn Header="Рынок" Binding="{Binding MarketPrice, StringFormat={}{0:0}}" Width="90" />
                     <DataGridTextColumn Header="Разница %" Binding="{Binding DifferencePercent, StringFormat={}{0:0.##}}" Width="90" />

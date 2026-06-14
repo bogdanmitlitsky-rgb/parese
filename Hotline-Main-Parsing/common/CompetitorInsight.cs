@@ -6,6 +6,8 @@ namespace Hotline_Main_Parsing.common
         public string Section { get; set; } = string.Empty;
         public string ProductId { get; set; } = string.Empty;
         public string ProductName { get; set; } = string.Empty;
+        public string HotlineUrl { get; set; } = string.Empty;
+        public string HotlineLinkLabel => string.IsNullOrWhiteSpace(HotlineUrl) ? string.Empty : "Hotline";
         public decimal OwnPrice { get; set; }
         public decimal OrientirPrice { get; set; }
         public int OffersCount { get; set; }

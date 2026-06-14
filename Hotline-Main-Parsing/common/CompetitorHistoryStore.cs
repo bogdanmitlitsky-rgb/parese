@@ -60,6 +60,16 @@ namespace Hotline_Main_Parsing.common
             }
         }
 
+        public static string ExportLatestToExcel()
+        {
+            var latest = ReadLatest();
+            Directory.CreateDirectory(DirectoryPath);
+
+            string path = Path.Combine(DirectoryPath, $"competitors_report_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.xlsx");
+            CompetitorExcelExporter.WriteReport(path, latest);
+            return path;
+        }
+
         public static string BuildMorningReport(DateTime date)
         {
             var latest = ReadLatest()
@@ -80,7 +90,11 @@ namespace Hotline_Main_Parsing.common
                 .Where(item => item.IsDumping)
                 .OrderByDescending(item => item.DumpingPercent ?? 0)
                 .Take(5)
-                .Select(item => $"- {TrimProductName(item.ProductName)}: {item.DumpingShop} {item.DumpingPrice:0} грн, ниже рынка на {item.DumpingPercent:0.##}%");
+                .Select(item =>
+                {
+                    string hotlineUrl = string.IsNullOrWhiteSpace(item.HotlineUrl) ? string.Empty : $"\n  {item.HotlineUrl}";
+                    return $"- {TrimProductName(item.ProductName)}: {item.DumpingShop} {item.DumpingPrice:0} грн, ниже рынка на {item.DumpingPercent:0.##}%{hotlineUrl}";
+                });
 
             var builder = new StringBuilder();
             builder.AppendLine($"Утренний отчет по Hotline за {date:dd.MM.yyyy}");
