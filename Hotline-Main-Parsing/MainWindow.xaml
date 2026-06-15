@@ -427,6 +427,7 @@
                                 <Setter Property="Foreground" Value="#34425A" />
                                 <Setter Property="FontWeight" Value="SemiBold" />
                                 <Setter Property="Padding" Value="8,6" />
+                                <Setter Property="HorizontalContentAlignment" Value="Center" />
                             </Style>
                         </ListView.Resources>
                         <ListView.View>
@@ -437,7 +438,9 @@
                                             <TextBlock Text="{Binding TimeText}"
                                                        FontFamily="Consolas"
                                                        Foreground="#44546A"
-                                                       Margin="8,0,0,0" />
+                                                       HorizontalAlignment="Stretch"
+                                                       TextAlignment="Center"
+                                                       Margin="0" />
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
@@ -449,7 +452,9 @@
                                                        Foreground="#1F365C"
                                                        FontWeight="SemiBold"
                                                        TextTrimming="CharacterEllipsis"
-                                                       Margin="8,0,0,0" />
+                                                       HorizontalAlignment="Stretch"
+                                                       TextAlignment="Center"
+                                                       Margin="0" />
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
@@ -471,12 +476,13 @@
                                                     BorderThickness="1"
                                                     CornerRadius="7"
                                                     Padding="8,2"
-                                                    HorizontalAlignment="Left"
-                                                    Margin="8,0,0,0">
+                                                    HorizontalAlignment="Center"
+                                                    Margin="0">
                                                 <TextBlock Text="{Binding StatusText}"
                                                            Foreground="{Binding AccentBrush}"
                                                            FontWeight="SemiBold"
-                                                           TextTrimming="CharacterEllipsis" />
+                                                           TextTrimming="CharacterEllipsis"
+                                                           TextAlignment="Center" />
                                             </Border>
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
@@ -487,8 +493,9 @@
                                             <TextBlock Text="{Binding OldPriceText}"
                                                        FontFamily="Consolas"
                                                        Foreground="#44546A"
-                                                       HorizontalAlignment="Right"
-                                                       Margin="8,0,8,0" />
+                                                       HorizontalAlignment="Stretch"
+                                                       TextAlignment="Center"
+                                                       Margin="0" />
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
@@ -499,8 +506,9 @@
                                                        FontFamily="Consolas"
                                                        Foreground="{Binding PriceBrush}"
                                                        FontWeight="SemiBold"
-                                                       HorizontalAlignment="Right"
-                                                       Margin="8,0,8,0" />
+                                                       HorizontalAlignment="Stretch"
+                                                       TextAlignment="Center"
+                                                       Margin="0" />
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
@@ -510,7 +518,9 @@
                                             <TextBlock Text="{Binding ElapsedText}"
                                                        FontFamily="Consolas"
                                                        Foreground="#44546A"
-                                                       Margin="8,0,0,0" />
+                                                       HorizontalAlignment="Stretch"
+                                                       TextAlignment="Center"
+                                                       Margin="0" />
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
