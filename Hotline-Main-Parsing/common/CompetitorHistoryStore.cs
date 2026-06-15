@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using System.IO;
+using System.Net;
 using System.Text;
 
 namespace Hotline_Main_Parsing.common
@@ -72,6 +73,16 @@ namespace Hotline_Main_Parsing.common
 
         public static string BuildMorningReport(DateTime date)
         {
+            return BuildMorningReport(date, useHtmlLinks: false);
+        }
+
+        public static string BuildMorningReportHtml(DateTime date)
+        {
+            return BuildMorningReport(date, useHtmlLinks: true);
+        }
+
+        private static string BuildMorningReport(DateTime date, bool useHtmlLinks)
+        {
             var latest = ReadLatest()
                 .Where(item => item.CheckedAt.Date == date.Date)
                 .ToList();
@@ -92,8 +103,13 @@ namespace Hotline_Main_Parsing.common
                 .Take(5)
                 .Select(item =>
                 {
-                    string hotlineUrl = string.IsNullOrWhiteSpace(item.HotlineUrl) ? string.Empty : $"\n  {item.HotlineUrl}";
-                    return $"- {TrimProductName(item.ProductName)}: {item.DumpingShop} {item.DumpingPrice:0} грн, ниже рынка на {item.DumpingPercent:0.##}%{hotlineUrl}";
+                    string productName = TrimProductName(item.ProductName);
+                    string productText = useHtmlLinks
+                        ? BuildHtmlProductLink(productName, item.HotlineUrl)
+                        : productName;
+                    string shopName = useHtmlLinks ? Html(item.DumpingShop) : item.DumpingShop;
+
+                    return $"- {productText}: {shopName} {item.DumpingPrice:0} грн, ниже рынка на {item.DumpingPercent:0.##}%";
                 });
 
             var builder = new StringBuilder();
@@ -148,6 +164,24 @@ namespace Hotline_Main_Parsing.common
             }
 
             return value.Length <= 60 ? value : value[..57] + "...";
+        }
+
+        private static string BuildHtmlProductLink(string productName, string hotlineUrl)
+        {
+            string safeName = Html(productName);
+            if (string.IsNullOrWhiteSpace(hotlineUrl) ||
+                !Uri.TryCreate(hotlineUrl, UriKind.Absolute, out var uri) ||
+                (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+            {
+                return safeName;
+            }
+
+            return $"<a href=\"{Html(uri.ToString())}\">{safeName}</a>";
+        }
+
+        private static string Html(string value)
+        {
+            return WebUtility.HtmlEncode(value ?? string.Empty);
         }
     }
 }

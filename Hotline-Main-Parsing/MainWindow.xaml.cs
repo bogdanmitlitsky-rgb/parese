@@ -1520,18 +1520,30 @@ namespace Hotline_Main_Parsing
                 .Replace("{elapsed}", stats.Elapsed.ToString(@"hh\:mm\:ss"));
         }
 
-        private static async Task SendMessages(string message, string token, string[] ids)
+        private static async Task SendMessages(string message, string token, string[] ids, string? parseMode = null, bool disableLinkPreview = false)
         {
             var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_10_3) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/63.0.3239.132 Safari/537.36");
             foreach (var id in ids)
             {
                 var messageUrl = $"https://api.telegram.org/bot{token}/sendMessage";
-                var postData = new FormUrlEncodedContent(new Dictionary<string, string>
+                var fields = new Dictionary<string, string>
                 {
                     ["chat_id"] = id,
                     ["text"] = message
-                });
+                };
+
+                if (!string.IsNullOrWhiteSpace(parseMode))
+                {
+                    fields["parse_mode"] = parseMode;
+                }
+
+                if (disableLinkPreview)
+                {
+                    fields["link_preview_options"] = "{\"is_disabled\":true}";
+                }
+
+                var postData = new FormUrlEncodedContent(fields);
 
                 var resp = await httpClient.PostAsync(messageUrl, postData);
                 resp.EnsureSuccessStatusCode();
@@ -1585,8 +1597,8 @@ namespace Hotline_Main_Parsing
                 return;
             }
 
-            string report = CompetitorHistoryStore.BuildMorningReport(DateTime.Now);
-            await SendMessages(report, token, ids);
+            string report = CompetitorHistoryStore.BuildMorningReportHtml(DateTime.Now);
+            await SendMessages(report, token, ids, parseMode: "HTML", disableLinkPreview: true);
             SaveAppSetting("MorningReportLastSentDate", today);
             AppendLog("Утренний Telegram-отчет отправлен.");
         }
