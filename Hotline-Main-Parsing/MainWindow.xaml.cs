@@ -126,6 +126,7 @@ namespace Hotline_Main_Parsing
         private enum TelegramCommandKind
         {
             Unknown,
+            Start,
             Status,
             Stop,
             Pause,
@@ -191,14 +192,21 @@ namespace Hotline_Main_Parsing
 
         private void Button_Click_1(object sender, RoutedEventArgs e)
         {
+            TryStartParsing("Парсинг запущен.");
+        }
+
+        private bool TryStartParsing(string startLogMessage)
+        {
             if (_parsingTask != null && !_parsingTask.IsCompleted)
             {
                 AppendLog("Парсинг уже запущен.");
-                return;
+                return false;
             }
 
             if (_tokenSource != null)
+            {
                 _tokenSource.Dispose();
+            }
 
             _tokenSource = new CancellationTokenSource();
             BeginRunLog();
@@ -207,8 +215,8 @@ namespace Hotline_Main_Parsing
             bStop.IsEnabled = true;
             SetStatus("Работает", "#DCFCE7", "#166534");
             SetStage("запуск парсинга");
-            AppendLog("Парсинг запущен.");
-            //_worker.RunWorkerAsync();
+            AppendLog(startLogMessage);
+            return true;
         }
 
         void worker_ProgressChanged(object sender, ProgressChangedEventArgs e)
@@ -1809,6 +1817,11 @@ namespace Hotline_Main_Parsing
             }
 
             command = command.Trim().ToLowerInvariant();
+            if (command is "/start" or "start" or "/старт" or "старт" or "/запуск" or "запуск")
+            {
+                return new TelegramCommand { Kind = TelegramCommandKind.Start };
+            }
+
             if (command is "статус" or "стасус" or "/статус" or "/status" or "status")
             {
                 return new TelegramCommand { Kind = TelegramCommandKind.Status };
@@ -1859,6 +1872,9 @@ namespace Hotline_Main_Parsing
         {
             switch (command.Kind)
             {
+                case TelegramCommandKind.Start:
+                    return await RequestStartFromTelegramAsync();
+
                 case TelegramCommandKind.Status:
                     return BuildTelegramStatusMessage();
 
@@ -1874,6 +1890,16 @@ namespace Hotline_Main_Parsing
                 default:
                     return "Команда не распознана.";
             }
+        }
+
+        private async Task<string> RequestStartFromTelegramAsync()
+        {
+            bool started = await Dispatcher.InvokeAsync(() =>
+                TryStartParsing("Telegram: получена команда /start. Парсинг запущен."));
+
+            return started
+                ? "Парсинг запущен."
+                : "Парсер уже запущен.";
         }
 
         private async Task<string> RequestStopFromTelegramAsync()
@@ -1919,37 +1945,18 @@ namespace Hotline_Main_Parsing
         private string BuildTelegramStatusMessage()
         {
             ProgressSnapshot snapshot = GetProgressSnapshot();
-            int processedTotal = Volatile.Read(ref _processedProducts);
-            int changedPrices = Volatile.Read(ref _changedPrices);
-            int errors = Volatile.Read(ref _errorCount);
-            TimeSpan elapsed = _runStopwatch?.Elapsed ?? snapshot.Elapsed;
-            string state = snapshot.Status;
+            string stageText = snapshot.Total > 0 && !string.IsNullOrWhiteSpace(snapshot.Section)
+                ? $"{snapshot.Section}: {snapshot.Processed}/{snapshot.Total}"
+                : snapshot.Stage;
             string progressText = snapshot.Total > 0
                 ? $"{snapshot.Progress:0}% ({snapshot.Processed}/{snapshot.Total})"
                 : "н/д";
-            string productText = TruncateForTelegram(snapshot.ProductName, 160);
-            string noteText = string.IsNullOrWhiteSpace(snapshot.Note) ? string.Empty : $" ({snapshot.Note})";
 
             var builder = new StringBuilder();
             builder.AppendLine("Статус Hotline Parser");
-            builder.AppendLine($"Состояние: {state}");
-            builder.AppendLine($"Этап: {snapshot.Stage}{noteText}");
+            builder.AppendLine($"Этап: {stageText}");
             builder.AppendLine($"Прогресс: {progressText}");
             builder.AppendLine($"Осталось: {(snapshot.Total > 0 ? snapshot.Eta : "н/д")}");
-            builder.AppendLine($"Прошло: {elapsed:hh\\:mm\\:ss}");
-            builder.AppendLine($"Обработано всего: {processedTotal}");
-            builder.AppendLine($"Цен сменилось: {changedPrices}");
-            builder.AppendLine($"Ошибок: {errors}");
-            string pauseText = GetTelegramPauseText();
-            if (!string.IsNullOrWhiteSpace(pauseText))
-            {
-                builder.AppendLine($"Пауза: {pauseText}");
-            }
-
-            if (!string.IsNullOrWhiteSpace(productText))
-            {
-                builder.AppendLine($"Товар: {productText}");
-            }
 
             return builder.ToString().Trim();
         }
