@@ -247,6 +247,17 @@ namespace Hotline_Main_Parsing.@default
             return ReadFirstColumn(values);
         }
 
+        private Dictionary<string, string> GetHotlineAvailabilityById()
+        {
+            var spreadSheet = _sheetsService.Spreadsheets.Get(_hotlineSpreadSheetId).Execute();
+            var sheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "📞 Парсинг Хотлайн")!;
+            var values = _sheetsService.Spreadsheets.Values.Get(
+                _hotlineSpreadSheetId,
+                $"'{EscapeSheetName(sheet.Properties.Title)}'!B3:H").Execute();
+
+            return ReadAvailabilityById(values);
+        }
+
         public Dictionary<string, decimal> GetCurrentBitPrices()
         {
             var result = new Dictionary<string, decimal>();
@@ -475,6 +486,39 @@ namespace Hotline_Main_Parsing.@default
             return values.Values.Select(v => v[0]).Cast<string>().ToArray();
         }
 
+        private static Dictionary<string, string> ReadAvailabilityById(ValueRange values)
+        {
+            var result = new Dictionary<string, string>();
+            if (values.Values == null)
+            {
+                return result;
+            }
+
+            foreach (var row in values.Values)
+            {
+                string id = GetCell(row, 0);
+                if (string.IsNullOrWhiteSpace(id))
+                {
+                    continue;
+                }
+
+                result[id] = GetCell(row, 6);
+            }
+
+            return result;
+        }
+
+        private static object? FormatAvailabilityForBit(string? availability)
+        {
+            if (string.IsNullOrWhiteSpace(availability))
+            {
+                return null;
+            }
+
+            string value = availability.Trim();
+            return value == "+" ? "'+" : value;
+        }
+
         private static decimal CalculateOrientirPrice(decimal optPrice, decimal markupPercent)
         {
             return Math.Ceiling(optPrice * (100m + markupPercent) / 100m);
@@ -643,6 +687,7 @@ namespace Hotline_Main_Parsing.@default
             var spreadSheet = _sheetsService.Spreadsheets.Get(_bitSpreadSheetId).Execute();
             var bitSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetBitIdsOrder();
+            var availabilityById = GetHotlineAvailabilityById();
             var values = new List<IList<object?>>();
             for (int i = 0; i < ids.Length; i++)
             {
@@ -664,11 +709,6 @@ namespace Hotline_Main_Parsing.@default
 
                 var row = values[i];
                 row[0] = product.BitPrice;
-                if (!string.IsNullOrEmpty(product.PriceAvailableness))
-                {
-                    product.PriceAvailableness = "'" + product.PriceAvailableness;
-                    row[7] = product.PriceAvailableness;
-                }
             }
             var valueRange = new ValueRange();
             valueRange.Values = values;
@@ -678,6 +718,49 @@ namespace Hotline_Main_Parsing.@default
             }
 
             var range = $"'{bitSheet.Properties.Title}'!I2:P{ids.Length + 1}";
+            var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _bitSpreadSheetId, range);
+            req.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
+            req.Execute();
+
+            UploadBitAvailability(bitSheet.Properties.Title, ids, availabilityById);
+        }
+
+        private void UploadBitAvailability(string bitSheetTitle, string[] bitIds, Dictionary<string, string> availabilityById)
+        {
+            var currentAvailability = _sheetsService.Spreadsheets.Values.Get(
+                _bitSpreadSheetId,
+                $"'{bitSheetTitle}'!P2:P{bitIds.Length + 1}").Execute();
+
+            var values = new List<IList<object?>>();
+            for (int i = 0; i < bitIds.Length; i++)
+            {
+                object? availabilityValue;
+                if (availabilityById.TryGetValue(bitIds[i], out string? availability))
+                {
+                    availabilityValue = FormatAvailabilityForBit(availability);
+                }
+                else
+                {
+                    string currentValue = currentAvailability.Values != null && currentAvailability.Values.Count > i
+                        ? GetCell(currentAvailability.Values[i], 0)
+                        : "";
+                    availabilityValue = FormatAvailabilityForBit(currentValue);
+                }
+
+                values.Add(new List<object?> { availabilityValue });
+            }
+
+            if (values.Count == 0)
+            {
+                return;
+            }
+
+            var valueRange = new ValueRange
+            {
+                Values = values
+            };
+
+            string range = $"'{bitSheetTitle}'!P2:P{bitIds.Length + 1}";
             var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _bitSpreadSheetId, range);
             req.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
             req.Execute();
