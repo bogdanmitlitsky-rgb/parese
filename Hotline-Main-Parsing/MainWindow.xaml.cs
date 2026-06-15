@@ -155,6 +155,7 @@ namespace Hotline_Main_Parsing
         public MainWindow()
         {
             InitializeComponent();
+            Topmost = true;
             LogList.ItemsSource = _visibleLogEntries;
 
             var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
@@ -1322,18 +1323,7 @@ namespace Hotline_Main_Parsing
                 return new TemperatureReadResult
                 {
                     Celsius = embeddedHardwareTemperature,
-                    Status = "температура прочитана из встроенных датчиков"
-                };
-            }
-
-            double? nvidiaTemperature = TryReadNvidiaSmiTemperatureCelsius(out string nvidiaStatus);
-            diagnostics.Add(nvidiaStatus);
-            if (nvidiaTemperature.HasValue)
-            {
-                return new TemperatureReadResult
-                {
-                    Celsius = nvidiaTemperature,
-                    Status = "температура прочитана через NVIDIA"
+                    Status = "температура CPU прочитана из встроенных датчиков"
                 };
             }
 
@@ -1344,7 +1334,7 @@ namespace Hotline_Main_Parsing
                 return new TemperatureReadResult
                 {
                     Celsius = hardwareMonitorTemperature,
-                    Status = "температура прочитана через Hardware Monitor"
+                    Status = "температура CPU прочитана через Hardware Monitor"
                 };
             }
 
@@ -1355,7 +1345,7 @@ namespace Hotline_Main_Parsing
                 return new TemperatureReadResult
                 {
                     Celsius = acpiTemperature,
-                    Status = "температура прочитана через Windows ACPI"
+                    Status = "температура CPU прочитана через Windows ACPI"
                 };
             }
 
@@ -1377,34 +1367,37 @@ namespace Hotline_Main_Parsing
                 computer = new Computer
                 {
                     IsCpuEnabled = true,
-                    IsGpuEnabled = true,
-                    IsMotherboardEnabled = true,
-                    IsMemoryEnabled = true,
-                    IsStorageEnabled = true,
+                    IsGpuEnabled = false,
+                    IsMotherboardEnabled = false,
+                    IsMemoryEnabled = false,
+                    IsStorageEnabled = false,
                     IsNetworkEnabled = false,
-                    IsControllerEnabled = true,
+                    IsControllerEnabled = false,
                     IsPsuEnabled = false,
-                    IsBatteryEnabled = true
+                    IsBatteryEnabled = false
                 };
 
                 computer.Open();
                 foreach (IHardware hardware in computer.Hardware)
                 {
-                    ReadHardwareTemperatures(hardware, temperatures);
+                    if (hardware.HardwareType == HardwareType.Cpu)
+                    {
+                        ReadHardwareTemperatures(hardware, temperatures);
+                    }
                 }
 
                 if (temperatures.Count == 0)
                 {
-                    status = $"встроенные датчики: 0 значений, устройств: {computer.Hardware.Count}";
+                    status = $"встроенные CPU-датчики: 0 значений, устройств: {computer.Hardware.Count}";
                     return null;
                 }
 
-                status = $"встроенные датчики: найдено {temperatures.Count}";
+                status = $"встроенные CPU-датчики: найдено {temperatures.Count}";
                 return temperatures.Max();
             }
             catch (Exception ex)
             {
-                status = $"встроенные датчики: ошибка {GetShortExceptionMessage(ex)}";
+                status = $"встроенные CPU-датчики: ошибка {GetShortExceptionMessage(ex)}";
                 return null;
             }
             finally
@@ -1536,7 +1529,7 @@ namespace Hotline_Main_Parsing
                 {
                     using var searcher = new ManagementObjectSearcher(
                         scope,
-                        "SELECT Name, SensorType, Value FROM Sensor WHERE SensorType = 'Temperature'");
+                        "SELECT Name, Identifier, SensorType, Value FROM Sensor WHERE SensorType = 'Temperature'");
 
                     var temperatures = new List<double>();
                     foreach (ManagementObject item in searcher.Get())
@@ -1545,6 +1538,13 @@ namespace Hotline_Main_Parsing
                         {
                             object? rawValue = item["Value"];
                             if (rawValue == null)
+                            {
+                                continue;
+                            }
+
+                            string name = item["Name"]?.ToString() ?? string.Empty;
+                            string identifier = item["Identifier"]?.ToString() ?? string.Empty;
+                            if (!IsCpuTemperatureSensor(name, identifier))
                             {
                                 continue;
                             }
@@ -1559,11 +1559,11 @@ namespace Hotline_Main_Parsing
 
                     if (temperatures.Count > 0)
                     {
-                        status = $"{scope}: найдено {temperatures.Count}";
+                        status = $"{scope}: найдено CPU-значений {temperatures.Count}";
                         return temperatures.Max();
                     }
 
-                    diagnostics.Add($"{scope}: 0 значений");
+                    diagnostics.Add($"{scope}: 0 CPU-значений");
                 }
                 catch (Exception ex)
                 {
@@ -1574,6 +1574,31 @@ namespace Hotline_Main_Parsing
 
             status = string.Join(", ", diagnostics);
             return null;
+        }
+
+        private static bool IsCpuTemperatureSensor(string name, string identifier)
+        {
+            string value = $"{identifier} {name}".ToLowerInvariant();
+            if (value.Contains("gpu") ||
+                value.Contains("nvidia") ||
+                value.Contains("radeon") ||
+                value.Contains("storage") ||
+                value.Contains("ssd") ||
+                value.Contains("hdd") ||
+                value.Contains("nvme"))
+            {
+                return false;
+            }
+
+            return value.Contains("cpu") ||
+                   value.Contains("intelcpu") ||
+                   value.Contains("amdcpu") ||
+                   value.Contains("processor") ||
+                   value.Contains("package") ||
+                   value.Contains("core") ||
+                   value.Contains("tctl") ||
+                   value.Contains("tdie") ||
+                   value.Contains("ccd");
         }
 
         private static double? TryReadAcpiTemperatureCelsius(out string status)

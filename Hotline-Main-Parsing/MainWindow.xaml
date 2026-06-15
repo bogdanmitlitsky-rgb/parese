@@ -13,6 +13,7 @@
         Icon="parser-logo.ico"
         WindowStartupLocation="CenterScreen"
         WindowState="Maximized"
+        Topmost="True"
         Background="#F3F6FB"
         FontFamily="Segoe UI">
     <Window.Resources>
@@ -87,7 +88,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
-                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Orientation="Horizontal"
                             VerticalAlignment="Center">
@@ -118,6 +119,7 @@
                     </StackPanel>
                 </StackPanel>
                 <WrapPanel Grid.Column="1"
+                            HorizontalAlignment="Center"
                             VerticalAlignment="Center"
                             Margin="18,0"
                             ItemHeight="42">
@@ -129,15 +131,19 @@
                             CornerRadius="8"
                             Padding="8,5"
                             Margin="0,0,8,0">
-                        <StackPanel>
+                        <StackPanel HorizontalAlignment="Center">
                             <TextBlock Text="ЦП"
                                        Foreground="#8EA0BA"
-                                       FontSize="10" />
+                                       FontSize="10"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center" />
                             <TextBlock x:Name="CpuUsageText"
                                        Text="0%"
                                        Foreground="#86EFAC"
                                        FontSize="15"
-                                       FontWeight="Bold" />
+                                       FontWeight="Bold"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center" />
                         </StackPanel>
                     </Border>
 
@@ -149,16 +155,20 @@
                             CornerRadius="8"
                             Padding="8,5"
                             Margin="0,0,8,0">
-                        <StackPanel>
+                        <StackPanel HorizontalAlignment="Center">
                             <TextBlock Text="RAM"
                                        Foreground="#8EA0BA"
-                                       FontSize="10" />
+                                       FontSize="10"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center" />
                             <TextBlock x:Name="RamUsageText"
                                        Text="0 МБ"
                                        Foreground="#86EFAC"
                                        FontSize="14"
                                        FontWeight="Bold"
-                                       Margin="0,1,0,0" />
+                                       Margin="0,1,0,0"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center" />
                         </StackPanel>
                     </Border>
 
@@ -170,43 +180,52 @@
                             CornerRadius="8"
                             Padding="8,5"
                             Margin="0,0,8,0">
-                        <StackPanel>
+                        <StackPanel HorizontalAlignment="Center">
                             <TextBlock Text="Chrome"
                                        Foreground="#8EA0BA"
-                                       FontSize="10" />
+                                       FontSize="10"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center" />
                             <TextBlock x:Name="ChromeUsageText"
                                        Text="0 / 0 МБ"
                                        Foreground="#86EFAC"
                                        FontSize="13"
                                        FontWeight="Bold"
-                                       Margin="0,2,0,0" />
+                                       Margin="0,2,0,0"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center" />
                         </StackPanel>
                     </Border>
 
-                    <Border Width="78"
+                    <Border Width="88"
                             Height="42"
                             Background="#17243A"
                             BorderBrush="#2C3E5F"
                             BorderThickness="1"
                             CornerRadius="8"
                             Padding="8,5">
-                        <StackPanel>
-                            <TextBlock Text="Темп."
+                        <StackPanel HorizontalAlignment="Center">
+                            <TextBlock Text="CPU °C"
                                        Foreground="#8EA0BA"
-                                       FontSize="10" />
+                                       FontSize="10"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center" />
                             <TextBlock x:Name="TemperatureText"
                                        Text="н/д"
                                        Foreground="#86EFAC"
                                        FontSize="14"
                                        FontWeight="Bold"
-                                       Margin="0,1,0,0" />
+                                       Margin="0,1,0,0"
+                                       TextAlignment="Center"
+                                       HorizontalAlignment="Center" />
                         </StackPanel>
                     </Border>
                 </WrapPanel>
 
                 <StackPanel Grid.Column="2"
                             Orientation="Horizontal"
-                            VerticalAlignment="Center">
+                            VerticalAlignment="Center"
+                            HorizontalAlignment="Right">
                     <Button x:Name="bNormalizeOrientir"
                             Visibility="Collapsed"
                             Content="Обновить D по ОПТ"
