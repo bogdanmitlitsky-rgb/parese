@@ -38,8 +38,10 @@ namespace Hotline_Main_Parsing.common
                 }
 
                 var latestList = latest.Values
-                    .OrderByDescending(item => item.IsDumping)
+                    .OrderByDescending(item => item.SoftPriceDropApplied)
+                    .ThenByDescending(item => item.IsDumping)
                     .ThenByDescending(item => item.OwnIsHigherThanMarket)
+                    .ThenByDescending(item => item.CanRaisePrice)
                     .ThenByDescending(item => item.CheckedAt)
                     .ToList();
 
@@ -54,8 +56,10 @@ namespace Hotline_Main_Parsing.common
             lock (FileLock)
             {
                 return ReadLatestUnsafe()
-                    .OrderByDescending(item => item.IsDumping)
+                    .OrderByDescending(item => item.SoftPriceDropApplied)
+                    .ThenByDescending(item => item.IsDumping)
                     .ThenByDescending(item => item.OwnIsHigherThanMarket)
+                    .ThenByDescending(item => item.CanRaisePrice)
                     .ThenByDescending(item => item.CheckedAt)
                     .ToList();
             }
@@ -95,6 +99,7 @@ namespace Hotline_Main_Parsing.common
             int dumping = latest.Count(item => item.IsDumping);
             int ownHigher = latest.Count(item => item.OwnIsHigherThanMarket);
             int canRaise = latest.Count(item => item.CanRaisePrice);
+            int softDrops = latest.Count(item => item.SoftPriceDropApplied);
             int withoutOffers = latest.Count(item => item.OffersCount == 0);
 
             var topDumping = latest
@@ -116,6 +121,7 @@ namespace Hotline_Main_Parsing.common
             builder.AppendLine($"Утренний отчет по Hotline за {date:dd.MM.yyyy}");
             builder.AppendLine($"Товаров в обзоре: {latest.Count}");
             builder.AppendLine($"Подозрение на демпинг: {dumping}");
+            builder.AppendLine($"Авто-снижений 1-3%: {softDrops}");
             builder.AppendLine($"Ты выше рынка: {ownHigher}");
             builder.AppendLine($"Можно поднять цену: {canRaise}");
             builder.AppendLine($"Без предложений: {withoutOffers}");

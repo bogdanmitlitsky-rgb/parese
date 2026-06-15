@@ -3,9 +3,9 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Конкуренты"
         Height="650"
-        Width="1120"
+        Width="1280"
         MinHeight="520"
-        MinWidth="920"
+        MinWidth="1020"
         Icon="parser-logo.ico"
         WindowStartupLocation="CenterOwner"
         Background="#F3F6FB"
@@ -111,16 +111,26 @@
                             </Style>
                         </DataGridHyperlinkColumn.ElementStyle>
                     </DataGridHyperlinkColumn>
+                    <DataGridTextColumn Header="Статус" Binding="{Binding ProductStatus}" Width="130" />
+                    <DataGridTextColumn Header="Детали" Binding="{Binding StatusDetails}" Width="220" />
                     <DataGridTextColumn Header="Твоя цена" Binding="{Binding OwnPrice, StringFormat={}{0:0}}" Width="95" />
                     <DataGridTextColumn Header="Рынок" Binding="{Binding MarketPrice, StringFormat={}{0:0}}" Width="90" />
                     <DataGridTextColumn Header="Разница %" Binding="{Binding DifferencePercent, StringFormat={}{0:0.##}}" Width="90" />
+                    <DataGridTextColumn Header="Ранг" Binding="{Binding OwnRank}" Width="65" />
+                    <DataGridTextColumn Header="Ниже нас" Binding="{Binding CompetitorsBelowOwnCount}" Width="80" />
+                    <DataGridTextColumn Header="Ближайший ниже" Binding="{Binding NearestLowerShop}" Width="140" />
+                    <DataGridTextColumn Header="Ниже %" Binding="{Binding NearestLowerPercent, StringFormat={}{0:0.##}}" Width="75" />
                     <DataGridTextColumn Header="Мин. магазин" Binding="{Binding LowestShop}" Width="140" />
                     <DataGridTextColumn Header="Мин. цена" Binding="{Binding LowestPrice, StringFormat={}{0:0}}" Width="90" />
+                    <DataGridCheckBoxColumn Header="Авто" Binding="{Binding SoftPriceDropApplied}" Width="65" />
+                    <DataGridTextColumn Header="Было" Binding="{Binding SoftPriceDropFromPrice, StringFormat={}{0:0}}" Width="70" />
+                    <DataGridTextColumn Header="Стало" Binding="{Binding SoftPriceDropToPrice, StringFormat={}{0:0}}" Width="70" />
                     <DataGridCheckBoxColumn Header="Демпинг" Binding="{Binding IsDumping}" Width="75" />
                     <DataGridTextColumn Header="Кто демпингует" Binding="{Binding DumpingShop}" Width="140" />
                     <DataGridTextColumn Header="Демп. %" Binding="{Binding DumpingPercent, StringFormat={}{0:0.##}}" Width="80" />
                     <DataGridCheckBoxColumn Header="Можно поднять" Binding="{Binding CanRaisePrice}" Width="105" />
                     <DataGridTextColumn Header="Предл." Binding="{Binding OffersCount}" Width="65" />
+                    <DataGridTextColumn Header="Карта конкурентов" Binding="{Binding CompetitorMap}" Width="320" />
                     <DataGridTextColumn Header="Дата" Binding="{Binding CheckedAt, StringFormat={}{0:dd.MM HH:mm}}" Width="105" />
                 </DataGrid.Columns>
             </DataGrid>

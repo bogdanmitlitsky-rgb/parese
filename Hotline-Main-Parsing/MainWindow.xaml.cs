@@ -669,6 +669,115 @@ namespace Hotline_Main_Parsing
             productInSheet.ReadyPrice = productInSheet.Price;
         }
 
+        private static SoftPriceAdjustmentResult ApplySoftCompetitorPriceDrop(DefaultSheets.ProductInSheet productInSheet, IReadOnlyList<Shop> shops, decimal rangePercent)
+        {
+            var result = TryCalculateSoftCompetitorPriceDrop(
+                productInSheet.Price,
+                productInSheet.ReadyPrice,
+                productInSheet.BuyPriceInGRN,
+                productInSheet.ParseMarkOld,
+                productInSheet.ParseMarkNew,
+                shops,
+                rangePercent);
+
+            if (!result.Applied)
+            {
+                return result;
+            }
+
+            productInSheet.BitPrice = result.NewPrice;
+            productInSheet.ReadyPrice = result.NewPrice;
+            return result;
+        }
+
+        private static SoftPriceAdjustmentResult ApplySoftCompetitorPriceDrop(Hotline_Main_Parsing.aks.ProductInSheet productInSheet, IReadOnlyList<Shop> shops, decimal rangePercent)
+        {
+            var result = TryCalculateSoftCompetitorPriceDrop(
+                productInSheet.Price,
+                productInSheet.ReadyPrice,
+                productInSheet.BuyPriceInGRN,
+                productInSheet.ParseMarkOld,
+                productInSheet.ParseMarkNew,
+                shops,
+                rangePercent);
+
+            if (!result.Applied)
+            {
+                return result;
+            }
+
+            productInSheet.BitPrice = result.NewPrice;
+            productInSheet.ReadyPrice = result.NewPrice;
+            return result;
+        }
+
+        private static SoftPriceAdjustmentResult TryCalculateSoftCompetitorPriceDrop(
+            decimal orientirPrice,
+            decimal currentReadyPrice,
+            decimal? buyPrice,
+            bool parseMarkOld,
+            bool parseMarkNew,
+            IReadOnlyList<Shop> shops,
+            decimal rangePercent)
+        {
+            if ((!parseMarkOld && !parseMarkNew) || orientirPrice <= 0 || currentReadyPrice <= 0)
+            {
+                return SoftPriceAdjustmentResult.None("товар не участвует в расчете цены");
+            }
+
+            var nearestLowerCompetitor = shops
+                .Where(shop => shop.Price > 0 &&
+                               shop.Price < currentReadyPrice &&
+                               !AntiDumpingService.IsOwnShop(shop.Name))
+                .OrderByDescending(shop => shop.Price)
+                .FirstOrDefault();
+
+            if (nearestLowerCompetitor == null)
+            {
+                return SoftPriceAdjustmentResult.None("конкурент рядом ниже не найден");
+            }
+
+            decimal gapPercent = Math.Round((currentReadyPrice - nearestLowerCompetitor.Price) / currentReadyPrice * 100m, 2);
+            if (gapPercent < 1m || gapPercent > 3m)
+            {
+                return SoftPriceAdjustmentResult.None("разница не входит в коридор 1-3%");
+            }
+
+            decimal newPrice = Math.Round(nearestLowerCompetitor.Price - 1m, 0, MidpointRounding.AwayFromZero);
+            decimal minAllowedPrice = CalculateMinimumAllowedPrice(orientirPrice, buyPrice, rangePercent);
+            if (newPrice <= 0 || newPrice >= currentReadyPrice)
+            {
+                return SoftPriceAdjustmentResult.None("новая цена не ниже текущей");
+            }
+
+            if (newPrice < minAllowedPrice)
+            {
+                return SoftPriceAdjustmentResult.None("ниже минимального порога");
+            }
+
+            return new SoftPriceAdjustmentResult
+            {
+                Applied = true,
+                ShopName = nearestLowerCompetitor.Name,
+                CompetitorPrice = nearestLowerCompetitor.Price,
+                OldPrice = currentReadyPrice,
+                NewPrice = newPrice,
+                GapPercent = gapPercent,
+                Reason = "конкурент ниже на 1-3%"
+            };
+        }
+
+        private static decimal CalculateMinimumAllowedPrice(decimal orientirPrice, decimal? buyPrice, decimal rangePercent)
+        {
+            decimal minByPercent = Math.Round(orientirPrice * (100 - rangePercent) / 100);
+            if (buyPrice.HasValue && buyPrice.Value > minByPercent)
+            {
+                return buyPrice.Value;
+            }
+
+            return minByPercent;
+        }
+
         private static async Task ApplyRrcBitPriceIfNeeded(DefaultSheets.ProductInSheet productInSheet, IList<object> row, IReadOnlyDictionary<string, int> symbols, string rrcPriceColumn)
         {
             if (!await ShouldUseRrcBitPrice(row))
@@ -1674,7 +1783,8 @@ namespace Hotline_Main_Parsing
             decimal orientirPrice,
             decimal ownPrice,
             IReadOnlyList<Shop> shops,
-            AntiDumpingResult antiDumping)
+            AntiDumpingResult antiDumping,
+            SoftPriceAdjustmentResult? softPriceDrop = null)
         {
             var competitors = shops
                 .Where(shop => shop.Price > 0 && !AntiDumpingService.IsOwnShop(shop.Name))
@@ -1683,8 +1793,19 @@ namespace Hotline_Main_Parsing
 
             var lowest = competitors.FirstOrDefault();
             var market = antiDumping.MarketShop ?? lowest;
+            var nearestLower = competitors
+                .Where(shop => ownPrice > 0 && shop.Price < ownPrice)
+                .OrderByDescending(shop => shop.Price)
+                .FirstOrDefault();
+            var nearestUpper = competitors
+                .Where(shop => ownPrice > 0 && shop.Price > ownPrice)
+                .OrderBy(shop => shop.Price)
+                .FirstOrDefault();
+
             decimal? differenceAmount = null;
             decimal? differencePercent = null;
+            decimal? nearestLowerPercent = null;
+            decimal? nearestUpperPercent = null;
             bool ownIsHigherThanMarket = false;
             bool canRaisePrice = false;
 
@@ -1696,6 +1817,52 @@ namespace Hotline_Main_Parsing
                 canRaisePrice = ownPrice < market.Price - 1;
             }
 
+            if (nearestLower != null && ownPrice > 0)
+            {
+                nearestLowerPercent = Math.Round((ownPrice - nearestLower.Price) / ownPrice * 100m, 2);
+            }
+
+            if (nearestUpper != null && ownPrice > 0)
+            {
+                nearestUpperPercent = Math.Round((nearestUpper.Price - ownPrice) / ownPrice * 100m, 2);
+            }
+
+            int competitorsBelowOwn = ownPrice > 0 ? competitors.Count(shop => shop.Price < ownPrice) : 0;
+            int competitorsAboveOwn = ownPrice > 0 ? competitors.Count(shop => shop.Price > ownPrice) : 0;
+            int ownRank = ownPrice > 0 ? competitorsBelowOwn + 1 : 0;
+            string competitorsBelowOwnText = BuildCompetitorListText(competitors
+                .Where(shop => ownPrice > 0 && shop.Price < ownPrice)
+                .OrderByDescending(shop => shop.Price));
+            string competitorMap = BuildCompetitorListText(competitors);
+
+            string productStatus = "Норма";
+            string statusDetails = "цена рядом с рынком";
+            if (competitors.Count == 0)
+            {
+                productStatus = "Нет предложений";
+                statusDetails = "на Hotline не найдено конкурентов";
+            }
+            else if (softPriceDrop?.Applied == true)
+            {
+                productStatus = "Авто-снижение";
+                statusDetails = $"{softPriceDrop.ShopName} ниже на {softPriceDrop.GapPercent:0.##}%, было {softPriceDrop.OldPrice:0}, стало {softPriceDrop.NewPrice:0}";
+            }
+            else if (antiDumping.IsDumping)
+            {
+                productStatus = "Демпинг";
+                statusDetails = $"{antiDumping.DumpingShop?.Name} ниже рынка на {antiDumping.DumpingPercent:0.##}%";
+            }
+            else if (ownIsHigherThanMarket)
+            {
+                productStatus = "Ты выше рынка";
+                statusDetails = $"выше ближайшего рынка на {differencePercent:0.##}%";
+            }
+            else if (canRaisePrice)
+            {
+                productStatus = "Можно поднять";
+                statusDetails = $"рынок выше твоей цены на {Math.Abs(differencePercent ?? 0):0.##}%";
+            }
+
             return new CompetitorInsight
             {
                 CheckedAt = DateTime.Now,
@@ -1703,22 +1870,45 @@ namespace Hotline_Main_Parsing
                 ProductId = productId,
                 ProductName = productName,
                 HotlineUrl = hotlineUrl,
+                ProductStatus = productStatus,
+                StatusDetails = statusDetails,
                 OrientirPrice = orientirPrice,
                 OwnPrice = ownPrice,
                 OffersCount = competitors.Count,
+                OwnRank = ownRank,
+                CompetitorsBelowOwnCount = competitorsBelowOwn,
+                CompetitorsAboveOwnCount = competitorsAboveOwn,
                 LowestShop = lowest?.Name ?? string.Empty,
                 LowestPrice = lowest?.Price,
+                NearestLowerShop = nearestLower?.Name ?? string.Empty,
+                NearestLowerPrice = nearestLower?.Price,
+                NearestLowerPercent = nearestLowerPercent,
+                NearestUpperShop = nearestUpper?.Name ?? string.Empty,
+                NearestUpperPrice = nearestUpper?.Price,
+                NearestUpperPercent = nearestUpperPercent,
                 MarketShop = market?.Name ?? string.Empty,
                 MarketPrice = market?.Price,
                 DumpingShop = antiDumping.DumpingShop?.Name ?? string.Empty,
                 DumpingPrice = antiDumping.DumpingShop?.Price,
                 DumpingPercent = antiDumping.IsDumping ? antiDumping.DumpingPercent : null,
                 IsDumping = antiDumping.IsDumping,
+                SoftPriceDropApplied = softPriceDrop?.Applied == true,
+                SoftPriceDropShop = softPriceDrop?.ShopName ?? string.Empty,
+                SoftPriceDropFromPrice = softPriceDrop?.Applied == true ? softPriceDrop.OldPrice : null,
+                SoftPriceDropToPrice = softPriceDrop?.Applied == true ? softPriceDrop.NewPrice : null,
+                SoftPriceDropPercent = softPriceDrop?.Applied == true ? softPriceDrop.GapPercent : null,
+                CompetitorsBelowOwn = competitorsBelowOwnText,
+                CompetitorMap = competitorMap,
                 DifferenceAmount = differenceAmount,
                 DifferencePercent = differencePercent,
                 OwnIsHigherThanMarket = ownIsHigherThanMarket,
                 CanRaisePrice = canRaisePrice
             };
+        }
+
+        private static string BuildCompetitorListText(IEnumerable<Shop> shops)
+        {
+            return string.Join("; ", shops.Select(shop => $"{shop.Name} {shop.Price:0}"));
         }
 
         private void SetStage(string stage)
@@ -2709,6 +2899,12 @@ namespace Hotline_Main_Parsing
                                 }
 
                                 Hotline_Main_Parsing.@default.PriceCalculator.CalculatePrices(productInSheet, antiDumping.ShopsForPrice, percent);
+                                var softPriceDrop = ApplySoftCompetitorPriceDrop(productInSheet, shops, percent);
+                                if (softPriceDrop.Applied)
+                                {
+                                    AppendLog($"Автоцена: {productId} - {softPriceDrop.ShopName} ниже нас на {softPriceDrop.GapPercent:0.##}%, ставлю {softPriceDrop.NewPrice:0} грн вместо {softPriceDrop.OldPrice:0}.");
+                                }
+
                                 if (SwitchParseMarkOldToNewIfNeeded(productInSheet))
                                 {
                                     Interlocked.Increment(ref switchedParseMarks);
@@ -2722,7 +2918,8 @@ namespace Hotline_Main_Parsing
                                     productInSheet.Price,
                                     productInSheet.ReadyPrice,
                                     shops,
-                                    antiDumping));
+                                    antiDumping,
+                                    softPriceDrop));
 
                                 await ApplyRrcBitPriceIfNeeded(productInSheet, data, dicSymbols, RRCPrice);
 
@@ -3160,6 +3357,12 @@ namespace Hotline_Main_Parsing
                                 }
 
                                 Hotline_Main_Parsing.aks.PriceCalculator.CalculatePrices(productInSheet, antiDumping.ShopsForPrice, percent);
+                                var softPriceDrop = ApplySoftCompetitorPriceDrop(productInSheet, shops, percent);
+                                if (softPriceDrop.Applied)
+                                {
+                                    AppendLog($"Автоцена АКС: {productId} - {softPriceDrop.ShopName} ниже нас на {softPriceDrop.GapPercent:0.##}%, ставлю {softPriceDrop.NewPrice:0} грн вместо {softPriceDrop.OldPrice:0}.");
+                                }
+
                                 if (SwitchParseMarkOldToNewIfNeeded(productInSheet))
                                 {
                                     Interlocked.Increment(ref switchedParseMarks);
@@ -3173,7 +3376,8 @@ namespace Hotline_Main_Parsing
                                     productInSheet.Price,
                                     productInSheet.ReadyPrice,
                                     shops,
-                                    antiDumping));
+                                    antiDumping,
+                                    softPriceDrop));
 
                                 await ApplyRrcBitPriceIfNeeded(productInSheet, data, dicSymbols, RRCPrice);
 

@@ -104,7 +104,8 @@ namespace Hotline_Main_Parsing
             int dumping = data.Count(item => item.IsDumping);
             int ownHigher = data.Count(item => item.OwnIsHigherThanMarket);
             int canRaise = data.Count(item => item.CanRaisePrice);
-            SummaryText.Text = $"Товаров: {data.Count} | Демпинг: {dumping} | Ты выше рынка: {ownHigher} | Можно поднять цену: {canRaise}";
+            int softDrops = data.Count(item => item.SoftPriceDropApplied);
+            SummaryText.Text = $"Товаров: {data.Count} | Авто-снижений: {softDrops} | Демпинг: {dumping} | Ты выше рынка: {ownHigher} | Можно поднять цену: {canRaise}";
         }
     }
 }

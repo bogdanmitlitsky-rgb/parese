@@ -10,21 +10,39 @@ namespace Hotline_Main_Parsing.common
     {
         private static readonly string[] Headers =
         {
-            "\u0420\u0430\u0437\u0434\u0435\u043b",
-            "\u0422\u043e\u0432\u0430\u0440",
+            "Раздел",
+            "Товар",
             "Hotline URL",
-            "\u0422\u0432\u043e\u044f \u0446\u0435\u043d\u0430",
-            "\u0420\u044b\u043d\u043e\u043a",
-            "\u0420\u0430\u0437\u043d\u0438\u0446\u0430 %",
-            "\u041c\u0438\u043d. \u043c\u0430\u0433\u0430\u0437\u0438\u043d",
-            "\u041c\u0438\u043d. \u0446\u0435\u043d\u0430",
-            "\u0414\u0435\u043c\u043f\u0438\u043d\u0433",
-            "\u041a\u0442\u043e \u0434\u0435\u043c\u043f\u0438\u043d\u0433\u0443\u0435\u0442",
-            "\u0414\u0435\u043c\u043f. \u0446\u0435\u043d\u0430",
-            "\u0414\u0435\u043c\u043f. %",
-            "\u041c\u043e\u0436\u043d\u043e \u043f\u043e\u0434\u043d\u044f\u0442\u044c",
-            "\u041f\u0440\u0435\u0434\u043b\u043e\u0436\u0435\u043d\u0438\u0439",
-            "\u0414\u0430\u0442\u0430"
+            "Статус",
+            "Детали",
+            "Твоя цена",
+            "Рынок",
+            "Разница %",
+            "Ранг цены",
+            "Конкурентов ниже",
+            "Конкурентов выше",
+            "Ближайший ниже",
+            "Цена ниже",
+            "Ниже %",
+            "Ближайший выше",
+            "Цена выше",
+            "Выше %",
+            "Мин. магазин",
+            "Мин. цена",
+            "Авто-снижение",
+            "Кого перебили",
+            "Было",
+            "Стало",
+            "Авто %",
+            "Демпинг",
+            "Кто демпингует",
+            "Демп. цена",
+            "Демп. %",
+            "Можно поднять",
+            "Предложений",
+            "Конкуренты ниже нас",
+            "Карта конкурентов",
+            "Дата"
         };
 
         public static void WriteReport(string path, IReadOnlyList<CompetitorInsight> rows)
@@ -58,7 +76,7 @@ namespace Hotline_Main_Parsing.common
             builder.AppendLine("""<col min="1" max="1" width="14" customWidth="1"/>""");
             builder.AppendLine("""<col min="2" max="2" width="55" customWidth="1"/>""");
             builder.AppendLine("""<col min="3" max="3" width="65" customWidth="1"/>""");
-            builder.AppendLine("""<col min="4" max="15" width="16" customWidth="1"/>""");
+            builder.AppendLine(CultureInfo.InvariantCulture, $"""<col min="4" max="{Headers.Length}" width="16" customWidth="1"/>""");
             builder.AppendLine("</cols>");
             builder.AppendLine("<sheetData>");
 
@@ -72,17 +90,35 @@ namespace Hotline_Main_Parsing.common
                     item.Section,
                     item.ProductName,
                     item.HotlineUrl,
+                    item.ProductStatus,
+                    item.StatusDetails,
                     FormatNumber(item.OwnPrice),
                     FormatNumber(item.MarketPrice),
                     FormatNumber(item.DifferencePercent),
+                    item.OwnRank > 0 ? item.OwnRank.ToString(CultureInfo.InvariantCulture) : string.Empty,
+                    item.CompetitorsBelowOwnCount.ToString(CultureInfo.InvariantCulture),
+                    item.CompetitorsAboveOwnCount.ToString(CultureInfo.InvariantCulture),
+                    item.NearestLowerShop,
+                    FormatNumber(item.NearestLowerPrice),
+                    FormatNumber(item.NearestLowerPercent),
+                    item.NearestUpperShop,
+                    FormatNumber(item.NearestUpperPrice),
+                    FormatNumber(item.NearestUpperPercent),
                     item.LowestShop,
                     FormatNumber(item.LowestPrice),
-                    item.IsDumping ? "\u0414\u0430" : "\u041d\u0435\u0442",
+                    item.SoftPriceDropApplied ? "Да" : "Нет",
+                    item.SoftPriceDropShop,
+                    FormatNumber(item.SoftPriceDropFromPrice),
+                    FormatNumber(item.SoftPriceDropToPrice),
+                    FormatNumber(item.SoftPriceDropPercent),
+                    item.IsDumping ? "Да" : "Нет",
                     item.DumpingShop,
                     FormatNumber(item.DumpingPrice),
                     FormatNumber(item.DumpingPercent),
-                    item.CanRaisePrice ? "\u0414\u0430" : "\u041d\u0435\u0442",
+                    item.CanRaisePrice ? "Да" : "Нет",
                     item.OffersCount.ToString(CultureInfo.InvariantCulture),
+                    item.CompetitorsBelowOwn,
+                    item.CompetitorMap,
                     item.CheckedAt.ToString("dd.MM.yyyy HH:mm", CultureInfo.InvariantCulture)
                 });
             }
