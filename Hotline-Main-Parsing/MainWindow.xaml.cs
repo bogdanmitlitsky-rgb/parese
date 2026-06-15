@@ -725,12 +725,14 @@ namespace Hotline_Main_Parsing
                 return SoftPriceAdjustmentResult.None("товар не участвует в расчете цены");
             }
 
-            var nearestLowerCompetitor = shops
+            var lowerCompetitors = shops
                 .Where(shop => shop.Price > 0 &&
                                shop.Price < currentReadyPrice &&
                                !AntiDumpingService.IsOwnShop(shop.Name))
                 .OrderByDescending(shop => shop.Price)
-                .FirstOrDefault();
+                .ToList();
+
+            var nearestLowerCompetitor = lowerCompetitors.FirstOrDefault();
 
             if (nearestLowerCompetitor == null)
             {
@@ -753,6 +755,16 @@ namespace Hotline_Main_Parsing
             if (newPrice < minAllowedPrice)
             {
                 return SoftPriceAdjustmentResult.None("ниже минимального порога");
+            }
+
+            var nextLowerCompetitor = lowerCompetitors.Skip(1).FirstOrDefault();
+            if (nextLowerCompetitor != null && newPrice > nextLowerCompetitor.Price)
+            {
+                decimal nextGapAfterDrop = Math.Round((newPrice - nextLowerCompetitor.Price) / newPrice * 100m, 2);
+                if (nextGapAfterDrop >= 1m && nextGapAfterDrop <= 3m)
+                {
+                    return SoftPriceAdjustmentResult.None("ниже есть еще один близкий конкурент");
+                }
             }
 
             return new SoftPriceAdjustmentResult
