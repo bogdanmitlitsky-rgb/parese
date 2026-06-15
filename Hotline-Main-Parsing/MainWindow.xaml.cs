@@ -17,6 +17,7 @@ using System.Windows.Controls;
 using System.Runtime.CompilerServices;
 using System.Windows.Threading;
 using Google.Apis.Sheets.v4.Data;
+using LibreHardwareMonitor.Hardware;
 using Newtonsoft.Json.Linq;
 using PuppeteerSharp.Input;
 using System.Globalization;
@@ -1061,6 +1062,12 @@ namespace Hotline_Main_Parsing
 
         private static double? TryReadTemperatureCelsius()
         {
+            double? embeddedHardwareTemperature = TryReadEmbeddedHardwareTemperatureCelsius();
+            if (embeddedHardwareTemperature.HasValue)
+            {
+                return embeddedHardwareTemperature;
+            }
+
             double? hardwareMonitorTemperature = TryReadHardwareMonitorTemperatureCelsius();
             if (hardwareMonitorTemperature.HasValue)
             {
@@ -1068,6 +1075,71 @@ namespace Hotline_Main_Parsing
             }
 
             return TryReadAcpiTemperatureCelsius();
+        }
+
+        private static double? TryReadEmbeddedHardwareTemperatureCelsius()
+        {
+            Computer? computer = null;
+            try
+            {
+                var temperatures = new List<double>();
+                computer = new Computer
+                {
+                    IsCpuEnabled = true,
+                    IsGpuEnabled = true,
+                    IsMotherboardEnabled = true,
+                    IsMemoryEnabled = false,
+                    IsStorageEnabled = false,
+                    IsNetworkEnabled = false,
+                    IsControllerEnabled = false,
+                    IsPsuEnabled = false,
+                    IsBatteryEnabled = false
+                };
+
+                computer.Open();
+                foreach (IHardware hardware in computer.Hardware)
+                {
+                    ReadHardwareTemperatures(hardware, temperatures);
+                }
+
+                return temperatures.Count == 0 ? null : temperatures.Max();
+            }
+            catch
+            {
+                return null;
+            }
+            finally
+            {
+                try
+                {
+                    computer?.Close();
+                }
+                catch
+                {
+                    // Hardware monitor cleanup is best-effort.
+                }
+            }
+        }
+
+        private static void ReadHardwareTemperatures(IHardware hardware, List<double> temperatures)
+        {
+            hardware.Update();
+            foreach (ISensor sensor in hardware.Sensors)
+            {
+                if (sensor.SensorType == SensorType.Temperature && sensor.Value.HasValue)
+                {
+                    double celsius = sensor.Value.Value;
+                    if (celsius > 0 && celsius < 130)
+                    {
+                        temperatures.Add(celsius);
+                    }
+                }
+            }
+
+            foreach (IHardware subHardware in hardware.SubHardware)
+            {
+                ReadHardwareTemperatures(subHardware, temperatures);
+            }
         }
 
         private static double? TryReadHardwareMonitorTemperatureCelsius()
