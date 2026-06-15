@@ -61,8 +61,13 @@ namespace Hotline_Main_Parsing
         private DateTime _lastResourceSampleUtc = DateTime.UtcNow;
         private DateTime _lastTemperatureSampleUtc = DateTime.MinValue;
         private double? _lastTemperatureCelsius;
+        private readonly object _resourceSnapshotLock = new object();
+        private readonly ResourceSnapshot _resourceSnapshot = new();
         private readonly object _progressSnapshotLock = new object();
         private readonly ProgressSnapshot _progressSnapshot = new();
+        private readonly object _telegramPauseLock = new object();
+        private DateTime? _telegramPauseUntilUtc;
+        private DateTime? _lastAnnouncedPauseUntilUtc;
         private CancellationTokenSource? _telegramStatusCts;
         private Task? _telegramStatusTask;
         private int _telegramStatusOffset;
@@ -89,6 +94,17 @@ namespace Hotline_Main_Parsing
             public TimeSpan Elapsed { get; set; }
         }
 
+        private sealed class ResourceSnapshot
+        {
+            public bool Available { get; set; }
+            public double CpuPercent { get; set; }
+            public long AppRamBytes { get; set; }
+            public long ChromeRamBytes { get; set; }
+            public int ChromeCount { get; set; }
+            public double? TemperatureCelsius { get; set; }
+            public DateTime SampleUtc { get; set; }
+        }
+
         private sealed class ProgressSnapshot
         {
             public string Status { get; set; } = "Ожидает запуска";
@@ -101,6 +117,22 @@ namespace Hotline_Main_Parsing
             public double Progress { get; set; }
             public TimeSpan Elapsed { get; set; }
             public string Eta { get; set; } = "н/д";
+        }
+
+        private enum TelegramCommandKind
+        {
+            Unknown,
+            Status,
+            Stop,
+            Pause,
+            Report,
+            Load
+        }
+
+        private sealed class TelegramCommand
+        {
+            public TelegramCommandKind Kind { get; init; }
+            public int? PauseMinutes { get; init; }
         }
 
         public bool IsParsingActive => _parsingTask != null && !_parsingTask.IsCompleted;
@@ -239,6 +271,7 @@ namespace Hotline_Main_Parsing
                     GC.Collect();
                     Dispatcher.InvokeAsync((Action)delegate { ClearVisibleLog(); });
                     Dispatcher.InvokeAsync((Action)delegate { pbStatus.Value = 0.0; });
+                    await WaitForTelegramPauseAsync("парсер", cancellationToken);
 
                     try
                     {
@@ -246,6 +279,7 @@ namespace Hotline_Main_Parsing
                         bool mainWorking = Convert.ToBoolean(config["mainWorking"]);
                         if (mainWorking && !cancellationToken.IsCancellationRequested)
                         {
+                            await WaitForTelegramPauseAsync("смартфоны", cancellationToken);
                             SetStage("смартфоны: подготовка");
                             AppendLog("Основной парсинг начался");
 
@@ -292,6 +326,7 @@ namespace Hotline_Main_Parsing
 
                         if (aksWorking && !cancellationToken.IsCancellationRequested)
                         {
+                            await WaitForTelegramPauseAsync("аксессуары", cancellationToken);
                             Dispatcher.InvokeAsync((Action)delegate { ClearVisibleLog(); });
                             SetStage("аксессуары: подготовка");
                             AppendLog("Парсинг аксессуаров начался");
@@ -353,6 +388,10 @@ namespace Hotline_Main_Parsing
                         File.AppendAllText("logs.txt", $"\n{e.Message} - {e.StackTrace}");
                     }
                 }
+            }
+            catch (Exception ex) when (cancellationToken.IsCancellationRequested || IsCancellationException(ex))
+            {
+                AppendLog("Парсинг остановлен пользователем.");
             }
             catch (Exception ex)
             {
@@ -924,7 +963,18 @@ namespace Hotline_Main_Parsing
                 CpuUsageText.Text = $"{Math.Min(999, totalCpu):0}%";
                 RamUsageText.Text = FormatMemory(appRam);
                 ChromeUsageText.Text = $"{chromeCount} / {FormatMemory(chromeRam)}";
-                UpdateTemperatureUsage(now);
+                double? temperature = UpdateTemperatureUsage(now);
+
+                lock (_resourceSnapshotLock)
+                {
+                    _resourceSnapshot.Available = true;
+                    _resourceSnapshot.CpuPercent = Math.Min(999, totalCpu);
+                    _resourceSnapshot.AppRamBytes = appRam;
+                    _resourceSnapshot.ChromeRamBytes = chromeRam;
+                    _resourceSnapshot.ChromeCount = chromeCount;
+                    _resourceSnapshot.TemperatureCelsius = temperature;
+                    _resourceSnapshot.SampleUtc = now;
+                }
 
                 CpuUsageText.Foreground = CreateBrush(totalCpu >= 80 ? "#DC2626" : totalCpu >= 50 ? "#D97706" : "#166534");
                 RamUsageText.Foreground = CreateBrush(appRam >= 800L * 1024 * 1024 ? "#DC2626" : appRam >= 300L * 1024 * 1024 ? "#D97706" : "#166534");
@@ -936,10 +986,15 @@ namespace Hotline_Main_Parsing
                 RamUsageText.Text = "н/д";
                 ChromeUsageText.Text = "н/д";
                 TemperatureText.Text = "н/д";
+                lock (_resourceSnapshotLock)
+                {
+                    _resourceSnapshot.Available = false;
+                    _resourceSnapshot.SampleUtc = DateTime.UtcNow;
+                }
             }
         }
 
-        private void UpdateTemperatureUsage(DateTime nowUtc)
+        private double? UpdateTemperatureUsage(DateTime nowUtc)
         {
             if ((nowUtc - _lastTemperatureSampleUtc).TotalSeconds >= 10)
             {
@@ -958,6 +1013,8 @@ namespace Hotline_Main_Parsing
                 TemperatureText.Text = "н/д";
                 TemperatureText.Foreground = CreateBrush("#8EA0BA");
             }
+
+            return _lastTemperatureCelsius;
         }
 
         private static double? TryReadTemperatureCelsius()
@@ -1466,13 +1523,26 @@ namespace Hotline_Main_Parsing
                 JToken? chat = message?["chat"];
                 string? chatId = chat?["id"]?.ToString();
 
-                if (string.IsNullOrWhiteSpace(chatId) || !IsAllowedTelegramChat(chat, allowedIds) || !IsTelegramStatusCommand(text))
+                if (string.IsNullOrWhiteSpace(chatId) || !IsAllowedTelegramChat(chat, allowedIds))
                 {
                     continue;
                 }
 
-                string statusMessage = BuildTelegramStatusMessage();
-                await SendMessageToChatAsync(statusMessage, botToken, chatId, cancellationToken);
+                TelegramCommand command = ParseTelegramCommand(text);
+                if (command.Kind == TelegramCommandKind.Unknown)
+                {
+                    continue;
+                }
+
+                if (command.Kind == TelegramCommandKind.Report)
+                {
+                    string report = CompetitorHistoryStore.BuildMorningReportHtml(DateTime.Now);
+                    await SendMessageToChatAsync(report, botToken, chatId, cancellationToken, parseMode: "HTML", disableLinkPreview: true);
+                    continue;
+                }
+
+                string responseMessage = await ExecuteTelegramCommandAsync(command);
+                await SendMessageToChatAsync(responseMessage, botToken, chatId, cancellationToken);
             }
         }
 
@@ -1502,14 +1572,15 @@ namespace Hotline_Main_Parsing
             return allowed.Contains(username) || allowed.Contains("@" + username);
         }
 
-        private static bool IsTelegramStatusCommand(string? text)
+        private static TelegramCommand ParseTelegramCommand(string? text)
         {
             if (string.IsNullOrWhiteSpace(text))
             {
-                return false;
+                return new TelegramCommand { Kind = TelegramCommandKind.Unknown };
             }
 
-            string command = text.Trim().Split(new[] { ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+            string[] parts = text.Trim().Split(new[] { ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            string command = parts.FirstOrDefault() ?? string.Empty;
             int botNameIndex = command.IndexOf('@');
             if (botNameIndex >= 0)
             {
@@ -1517,7 +1588,111 @@ namespace Hotline_Main_Parsing
             }
 
             command = command.Trim().ToLowerInvariant();
-            return command is "статус" or "стасус" or "/статус" or "/status" or "status";
+            if (command is "статус" or "стасус" or "/статус" or "/status" or "status")
+            {
+                return new TelegramCommand { Kind = TelegramCommandKind.Status };
+            }
+
+            if (command is "/stop" or "stop" or "/стоп" or "стоп")
+            {
+                return new TelegramCommand { Kind = TelegramCommandKind.Stop };
+            }
+
+            if (command is "/load" or "load" or "/нагрузка" or "нагрузка")
+            {
+                return new TelegramCommand { Kind = TelegramCommandKind.Load };
+            }
+
+            if (command is "/report" or "report" or "/отчет" or "отчет" or "/отчёт" or "отчёт")
+            {
+                return new TelegramCommand { Kind = TelegramCommandKind.Report };
+            }
+
+            if (command is "/pause" or "pause" or "/пауза" or "пауза")
+            {
+                int pauseMinutes = 10;
+                if (parts.Length > 1)
+                {
+                    string value = parts[1].Trim().ToLowerInvariant();
+                    if (value is "off" or "stop" or "стоп" or "выкл")
+                    {
+                        pauseMinutes = 0;
+                    }
+                    else if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out pauseMinutes))
+                    {
+                        pauseMinutes = 10;
+                    }
+                }
+
+                return new TelegramCommand
+                {
+                    Kind = TelegramCommandKind.Pause,
+                    PauseMinutes = Math.Clamp(pauseMinutes, 0, 180)
+                };
+            }
+
+            return new TelegramCommand { Kind = TelegramCommandKind.Unknown };
+        }
+
+        private async Task<string> ExecuteTelegramCommandAsync(TelegramCommand command)
+        {
+            switch (command.Kind)
+            {
+                case TelegramCommandKind.Status:
+                    return BuildTelegramStatusMessage();
+
+                case TelegramCommandKind.Stop:
+                    return await RequestStopFromTelegramAsync();
+
+                case TelegramCommandKind.Pause:
+                    return RequestPauseFromTelegram(command.PauseMinutes ?? 10);
+
+                case TelegramCommandKind.Load:
+                    return BuildTelegramLoadMessage();
+
+                default:
+                    return "Команда не распознана.";
+            }
+        }
+
+        private async Task<string> RequestStopFromTelegramAsync()
+        {
+            if (_tokenSource == null || _tokenSource.IsCancellationRequested || !IsParsingActive)
+            {
+                return "Парсер сейчас не запущен.";
+            }
+
+            _tokenSource.Cancel();
+            ClearTelegramPause();
+            await Dispatcher.InvokeAsync((Action)delegate
+            {
+                bStop.IsEnabled = false;
+                SetStatus("Останавливается", "#FEF3C7", "#92400E");
+                SetStage("остановка из Telegram");
+            });
+
+            AppendLog("Telegram: получена команда /stop. Остановка после текущего товара.");
+            return "Остановка запрошена. Парсер остановится после текущего товара и закроет браузер.";
+        }
+
+        private string RequestPauseFromTelegram(int minutes)
+        {
+            if (minutes <= 0)
+            {
+                ClearTelegramPause();
+                AppendLog("Telegram: пауза снята.");
+                return "Пауза снята.";
+            }
+
+            DateTime pauseUntilUtc = DateTime.UtcNow.AddMinutes(minutes);
+            lock (_telegramPauseLock)
+            {
+                _telegramPauseUntilUtc = pauseUntilUtc;
+                _lastAnnouncedPauseUntilUtc = null;
+            }
+
+            AppendLog($"Telegram: пауза на {minutes} мин., до {pauseUntilUtc.ToLocalTime():HH:mm:ss}.");
+            return $"Пауза включена на {minutes} мин.\nДо: {pauseUntilUtc.ToLocalTime():HH:mm:ss}\nНовые товары подождут, текущий товар спокойно завершится.";
         }
 
         private string BuildTelegramStatusMessage()
@@ -1544,12 +1719,39 @@ namespace Hotline_Main_Parsing
             builder.AppendLine($"Обработано всего: {processedTotal}");
             builder.AppendLine($"Цен сменилось: {changedPrices}");
             builder.AppendLine($"Ошибок: {errors}");
+            string pauseText = GetTelegramPauseText();
+            if (!string.IsNullOrWhiteSpace(pauseText))
+            {
+                builder.AppendLine($"Пауза: {pauseText}");
+            }
 
             if (!string.IsNullOrWhiteSpace(productText))
             {
                 builder.AppendLine($"Товар: {productText}");
             }
 
+            return builder.ToString().Trim();
+        }
+
+        private string BuildTelegramLoadMessage()
+        {
+            ResourceSnapshot snapshot = GetResourceSnapshot();
+            if (!snapshot.Available)
+            {
+                return "Нагрузка: данные пока недоступны.";
+            }
+
+            string temperature = snapshot.TemperatureCelsius.HasValue
+                ? $"{snapshot.TemperatureCelsius.Value:0}°C"
+                : "н/д";
+
+            var builder = new StringBuilder();
+            builder.AppendLine("Нагрузка Hotline Parser");
+            builder.AppendLine($"ЦП: {snapshot.CpuPercent:0}%");
+            builder.AppendLine($"RAM программы: {FormatMemory(snapshot.AppRamBytes)}");
+            builder.AppendLine($"Chrome: {snapshot.ChromeCount} / {FormatMemory(snapshot.ChromeRamBytes)}");
+            builder.AppendLine($"Температура: {temperature}");
+            builder.AppendLine($"Обновлено: {snapshot.SampleUtc.ToLocalTime():HH:mm:ss}");
             return builder.ToString().Trim();
         }
 
@@ -1571,6 +1773,128 @@ namespace Hotline_Main_Parsing
                     Eta = _progressSnapshot.Eta
                 };
             }
+        }
+
+        private ResourceSnapshot GetResourceSnapshot()
+        {
+            lock (_resourceSnapshotLock)
+            {
+                return new ResourceSnapshot
+                {
+                    Available = _resourceSnapshot.Available,
+                    CpuPercent = _resourceSnapshot.CpuPercent,
+                    AppRamBytes = _resourceSnapshot.AppRamBytes,
+                    ChromeRamBytes = _resourceSnapshot.ChromeRamBytes,
+                    ChromeCount = _resourceSnapshot.ChromeCount,
+                    TemperatureCelsius = _resourceSnapshot.TemperatureCelsius,
+                    SampleUtc = _resourceSnapshot.SampleUtc
+                };
+            }
+        }
+
+        private string GetTelegramPauseText()
+        {
+            DateTime? pauseUntilUtc = GetTelegramPauseUntilUtc();
+            if (!pauseUntilUtc.HasValue)
+            {
+                return string.Empty;
+            }
+
+            TimeSpan remaining = pauseUntilUtc.Value - DateTime.UtcNow;
+            if (remaining <= TimeSpan.Zero)
+            {
+                ClearTelegramPause();
+                return string.Empty;
+            }
+
+            return $"до {pauseUntilUtc.Value.ToLocalTime():HH:mm:ss}, осталось {FormatPauseRemaining(remaining)}";
+        }
+
+        private async Task WaitForTelegramPauseAsync(string section, CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                DateTime? pauseUntilUtc = GetTelegramPauseUntilUtc();
+                if (!pauseUntilUtc.HasValue)
+                {
+                    return;
+                }
+
+                TimeSpan remaining = pauseUntilUtc.Value - DateTime.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    ClearTelegramPause();
+                    if (IsParsingActive)
+                    {
+                        await Dispatcher.InvokeAsync((Action)delegate
+                        {
+                            SetStatus("Работает", "#DCFCE7", "#166534");
+                        });
+                    }
+                    return;
+                }
+
+                if (ShouldAnnouncePauseStage(pauseUntilUtc.Value))
+                {
+                    await Dispatcher.InvokeAsync((Action)delegate
+                    {
+                        SetStatus("Пауза", "#DBEAFE", "#1D4ED8");
+                    });
+                    SetStage($"{section}: пауза до {pauseUntilUtc.Value.ToLocalTime():HH:mm:ss}");
+                    AppendLog($"{section}: пауза до {pauseUntilUtc.Value.ToLocalTime():HH:mm:ss}");
+                }
+
+                TimeSpan delay = remaining < TimeSpan.FromSeconds(1)
+                    ? remaining
+                    : TimeSpan.FromSeconds(1);
+                await Task.Delay(delay, cancellationToken);
+            }
+        }
+
+        private DateTime? GetTelegramPauseUntilUtc()
+        {
+            lock (_telegramPauseLock)
+            {
+                return _telegramPauseUntilUtc;
+            }
+        }
+
+        private bool ShouldAnnouncePauseStage(DateTime pauseUntilUtc)
+        {
+            lock (_telegramPauseLock)
+            {
+                if (_lastAnnouncedPauseUntilUtc == pauseUntilUtc)
+                {
+                    return false;
+                }
+
+                _lastAnnouncedPauseUntilUtc = pauseUntilUtc;
+                return true;
+            }
+        }
+
+        private void ClearTelegramPause()
+        {
+            lock (_telegramPauseLock)
+            {
+                _telegramPauseUntilUtc = null;
+                _lastAnnouncedPauseUntilUtc = null;
+            }
+        }
+
+        private static string FormatPauseRemaining(TimeSpan remaining)
+        {
+            if (remaining.TotalHours >= 1)
+            {
+                return remaining.ToString(@"h\:mm\:ss");
+            }
+
+            if (remaining.TotalMinutes >= 1)
+            {
+                return remaining.ToString(@"m\:ss");
+            }
+
+            return "<1 мин";
         }
 
         private static string TruncateForTelegram(string value, int maxLength)
@@ -1666,16 +1990,34 @@ namespace Hotline_Main_Parsing
             }
         }
 
-        private static async Task SendMessageToChatAsync(string message, string token, string chatId, CancellationToken cancellationToken)
+        private static async Task SendMessageToChatAsync(
+            string message,
+            string token,
+            string chatId,
+            CancellationToken cancellationToken,
+            string? parseMode = null,
+            bool disableLinkPreview = false)
         {
             using var httpClient = new HttpClient();
             httpClient.DefaultRequestHeaders.Add("User-Agent", "Hotline Parser Telegram Status");
             var messageUrl = $"https://api.telegram.org/bot{token}/sendMessage";
-            var postData = new FormUrlEncodedContent(new Dictionary<string, string>
+            var fields = new Dictionary<string, string>
             {
                 ["chat_id"] = chatId,
                 ["text"] = message
-            });
+            };
+
+            if (!string.IsNullOrWhiteSpace(parseMode))
+            {
+                fields["parse_mode"] = parseMode;
+            }
+
+            if (disableLinkPreview)
+            {
+                fields["link_preview_options"] = "{\"is_disabled\":true}";
+            }
+
+            var postData = new FormUrlEncodedContent(fields);
 
             var resp = await httpClient.PostAsync(messageUrl, postData, cancellationToken);
             resp.EnsureSuccessStatusCode();
@@ -1832,6 +2174,7 @@ namespace Hotline_Main_Parsing
                     ManagerHotline managerHotline = null;
                     try
                     {
+                        await WaitForTelegramPauseAsync("смартфоны", token);
                         if (!managers.TryDequeue(out managerHotline))
                         {
                             Console.WriteLine("Warning: Manager queue was temporarily empty!");
@@ -2285,6 +2628,7 @@ namespace Hotline_Main_Parsing
                     ManagerHotline managerHotline = null;
                     try
                     {
+                        await WaitForTelegramPauseAsync("аксессуары", token);
                         if (!managers.TryDequeue(out managerHotline))
                         {
                             Console.WriteLine("Warning: Manager queue was temporarily empty!");
