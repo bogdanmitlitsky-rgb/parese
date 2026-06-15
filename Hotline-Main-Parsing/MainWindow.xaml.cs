@@ -648,6 +648,48 @@ namespace Hotline_Main_Parsing
             productInSheet.ReadyPrice = productInSheet.Price;
         }
 
+        private static async Task ApplyRrcBitPriceIfNeeded(DefaultSheets.ProductInSheet productInSheet, IList<object> row, IReadOnlyDictionary<string, int> symbols, string rrcPriceColumn)
+        {
+            if (!await ShouldUseRrcBitPrice(row))
+            {
+                return;
+            }
+
+            if (TryGetRrcPrice(row, symbols, rrcPriceColumn, out decimal bitPrice))
+            {
+                productInSheet.BitPrice = bitPrice;
+            }
+        }
+
+        private static async Task ApplyRrcBitPriceIfNeeded(Hotline_Main_Parsing.aks.ProductInSheet productInSheet, IList<object> row, IReadOnlyDictionary<string, int> symbols, string rrcPriceColumn)
+        {
+            if (!await ShouldUseRrcBitPrice(row))
+            {
+                return;
+            }
+
+            if (TryGetRrcPrice(row, symbols, rrcPriceColumn, out decimal bitPrice))
+            {
+                productInSheet.BitPrice = bitPrice;
+            }
+        }
+
+        private static async Task<bool> ShouldUseRrcBitPrice(IList<object> row)
+        {
+            return IsCheckedCell(row, 11) && await TimeOut();
+        }
+
+        private static bool TryGetRrcPrice(IList<object> row, IReadOnlyDictionary<string, int> symbols, string rrcPriceColumn, out decimal price)
+        {
+            price = 0;
+            if (string.IsNullOrWhiteSpace(rrcPriceColumn) || !symbols.TryGetValue(rrcPriceColumn, out int rrcPriceIndex))
+            {
+                return false;
+            }
+
+            return TryParseSheetPrice(GetSheetCell(row, rrcPriceIndex), out price) && price > 0;
+        }
+
         private static bool SwitchParseMarkOldToNewIfNeeded(DefaultSheets.ProductInSheet productInSheet)
         {
             if (!ShouldSwitchParseMarkOldToNew(productInSheet.Price, productInSheet.ReadyPrice, productInSheet.PriceRange, productInSheet.ParseMarkOld, productInSheet.ParseMarkNew))
@@ -2205,6 +2247,7 @@ namespace Hotline_Main_Parsing
                             skipped.BitPrice = oldBitPrices.TryGetValue(productId, out decimal sob) && sob > 0 ? sob : skipped.Price;
                             skipped.ReadyPrice = oldReadyPrices.TryGetValue(productId, out decimal sor) && sor > 0 ? sor : skipped.Price;
                             ApplyOrientirAsResultIfNeeded(skipped, useOrientirAsResult);
+                            await ApplyRrcBitPriceIfNeeded(skipped, data, dicSymbols, RRCPrice);
                             productsInSheet.Add(skipped);
                             UpdateProgressStage("Смартфоны", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, "нету в наличии");
                             return;
@@ -2238,6 +2281,7 @@ namespace Hotline_Main_Parsing
 
                                 if (string.IsNullOrEmpty(productInSheet.Url))
                                 {
+                                    await ApplyRrcBitPriceIfNeeded(productInSheet, data, dicSymbols, RRCPrice);
                                     productsInSheet.Add(productInSheet);
                                     UpdateProgressStage("Смартфоны", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, "пропуск: нет ссылки");
                                     return;
@@ -2303,18 +2347,7 @@ namespace Hotline_Main_Parsing
                                     shops,
                                     antiDumping));
 
-                                bool ss = (string)data[11] == "TRUE";
-                                if (ss == true && await TimeOut())
-                                {
-                                    if (data[dicSymbols[RRCPrice]] != null && data[dicSymbols[RRCPrice]].ToString() != "")
-                                    {
-                                        string ww = data[dicSymbols[RRCPrice]].ToString().Replace(" ", "");
-                                        if (decimal.TryParse(ww, out decimal bitPrice))
-                                        {
-                                            productInSheet.BitPrice = bitPrice;
-                                        }
-                                    }
-                                }
+                                await ApplyRrcBitPriceIfNeeded(productInSheet, data, dicSymbols, RRCPrice);
 
                                 productsInSheet.Add(productInSheet);
                                 success = true;
@@ -2387,6 +2420,7 @@ namespace Hotline_Main_Parsing
                             fallback.BitPrice = oldBitPrices.TryGetValue(productId, out decimal fob) && fob > 0 ? fob : fallback.Price;
                             fallback.ReadyPrice = oldReadyPrices.TryGetValue(productId, out decimal for2) && for2 > 0 ? for2 : fallback.Price;
                             ApplyOrientirAsResultIfNeeded(fallback, useOrientirAsResult);
+                            await ApplyRrcBitPriceIfNeeded(fallback, data, dicSymbols, RRCPrice);
                             if (!noOffers) // Пишем в brokenLinks только при таймауте прокси, не при отсутствии товара
                             {
                                 lock (_brokenLinksLock)
@@ -2659,6 +2693,7 @@ namespace Hotline_Main_Parsing
                             skipped.BitPrice = oldBitPricesAks.TryGetValue(productId, out decimal sob) && sob > 0 ? sob : skipped.Price;
                             skipped.ReadyPrice = oldReadyPricesAks.TryGetValue(productId, out decimal sor) && sor > 0 ? sor : skipped.Price;
                             ApplyOrientirAsResultIfNeeded(skipped, useOrientirAsResult);
+                            await ApplyRrcBitPriceIfNeeded(skipped, data, dicSymbols, RRCPrice);
                             productsInSheet.Add(skipped);
                             UpdateProgressStage("Аксессуары", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, "нету в наличии");
                             return;
@@ -2692,12 +2727,13 @@ namespace Hotline_Main_Parsing
                                 productInSheet.Url = GetHotlineUrl(data);
                                 productInSheet.ParseMarkOld = (string)data[9] == "TRUE";
                                 productInSheet.ParseMarkNew = (string)data[10] == "TRUE";
-                                bool ss = productInSheet.ParseMarkRRC = (string)data[11] == "TRUE";
+                                productInSheet.ParseMarkRRC = IsCheckedCell(data, 11);
                                 productInSheet.PriceAvailableness = (string?)data[7];
                                 ApplyOrientirAsResultIfNeeded(productInSheet, useOrientirAsResult);
 
                                 if (string.IsNullOrEmpty(productInSheet.Url))
                                 {
+                                    await ApplyRrcBitPriceIfNeeded(productInSheet, data, dicSymbols, RRCPrice);
                                     productsInSheet.Add(productInSheet);
                                     UpdateProgressStage("Аксессуары", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, "пропуск: нет ссылки");
                                     return;
@@ -2761,6 +2797,8 @@ namespace Hotline_Main_Parsing
                                     shops,
                                     antiDumping));
 
+                                await ApplyRrcBitPriceIfNeeded(productInSheet, data, dicSymbols, RRCPrice);
+
                                 productsInSheet.Add(productInSheet);
                                 success = true;
 
@@ -2818,6 +2856,7 @@ namespace Hotline_Main_Parsing
                             fallback.BitPrice = oldBitPricesAks.TryGetValue(productId, out decimal fob) && fob > 0 ? fob : fallback.Price;
                             fallback.ReadyPrice = oldReadyPricesAks.TryGetValue(productId, out decimal for2) && for2 > 0 ? for2 : fallback.Price;
                             ApplyOrientirAsResultIfNeeded(fallback, useOrientirAsResult);
+                            await ApplyRrcBitPriceIfNeeded(fallback, data, dicSymbols, RRCPrice);
                             if (!noOffers)
                             {
                                 lock (_brokenLinksLock)
