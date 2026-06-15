@@ -58,6 +58,14 @@ namespace Hotline_Main_Parsing
         private readonly DispatcherTimer _resourceMonitorTimer = new();
         private readonly Dictionary<int, TimeSpan> _lastCpuByProcess = new();
         private DateTime _lastResourceSampleUtc = DateTime.UtcNow;
+        private readonly object _progressSnapshotLock = new object();
+        private readonly ProgressSnapshot _progressSnapshot = new();
+        private CancellationTokenSource? _telegramStatusCts;
+        private Task? _telegramStatusTask;
+        private int _telegramStatusOffset;
+        private bool _telegramStatusInitialized;
+        private string? _telegramStatusBotToken;
+        private static readonly TimeSpan TelegramStatusPollInterval = TimeSpan.FromSeconds(3);
 
         private sealed class VisibleLogEntry
         {
@@ -76,6 +84,20 @@ namespace Hotline_Main_Parsing
             public int ChangedPrices { get; set; }
             public int Errors { get; set; }
             public TimeSpan Elapsed { get; set; }
+        }
+
+        private sealed class ProgressSnapshot
+        {
+            public string Status { get; set; } = "Ожидает запуска";
+            public string Stage { get; set; } = "ожидание запуска";
+            public string Section { get; set; } = string.Empty;
+            public string ProductName { get; set; } = string.Empty;
+            public string Note { get; set; } = string.Empty;
+            public int Processed { get; set; }
+            public int Total { get; set; }
+            public double Progress { get; set; }
+            public TimeSpan Elapsed { get; set; }
+            public string Eta { get; set; } = "н/д";
         }
 
         public bool IsParsingActive => _parsingTask != null && !_parsingTask.IsCompleted;
@@ -110,7 +132,16 @@ namespace Hotline_Main_Parsing
             _resourceMonitorTimer.Tick += ResourceMonitorTimer_Tick;
             _resourceMonitorTimer.Start();
             UpdateResourceUsage();
+            StartTelegramStatusListener();
         }
+
+        protected override void OnClosed(EventArgs e)
+        {
+            _telegramStatusCts?.Cancel();
+            _resourceMonitorTimer.Stop();
+            base.OnClosed(e);
+        }
+
         private void ConsoleOutputTextBox_TextChanged(object sender, TextChangedEventArgs e)
         {
         }
@@ -625,6 +656,16 @@ namespace Hotline_Main_Parsing
             _processedProducts = 0;
             _changedPrices = 0;
             _errorCount = 0;
+            lock (_progressSnapshotLock)
+            {
+                _progressSnapshot.Processed = 0;
+                _progressSnapshot.Total = 0;
+                _progressSnapshot.Progress = 0;
+                _progressSnapshot.Elapsed = TimeSpan.Zero;
+                _progressSnapshot.Eta = "считаю";
+                _progressSnapshot.ProductName = string.Empty;
+                _progressSnapshot.Note = string.Empty;
+            }
             _runLogPath = Path.Combine(GetLogsDirectory(), $"run_{DateTime.Now:yyyy-MM-dd_HH-mm-ss}.log");
 
             File.WriteAllText(_runLogPath,
@@ -1099,6 +1140,18 @@ namespace Hotline_Main_Parsing
 
         private void SetStage(string stage)
         {
+            lock (_progressSnapshotLock)
+            {
+                _progressSnapshot.Stage = stage;
+                _progressSnapshot.Section = string.Empty;
+                _progressSnapshot.ProductName = string.Empty;
+                _progressSnapshot.Note = string.Empty;
+                _progressSnapshot.Processed = 0;
+                _progressSnapshot.Total = 0;
+                _progressSnapshot.Progress = 0;
+                _progressSnapshot.Eta = "н/д";
+            }
+
             Dispatcher.InvokeAsync((Action)delegate
             {
                 StageText.Text = $"Текущий этап: {stage}";
@@ -1115,6 +1168,19 @@ namespace Hotline_Main_Parsing
             string noteText = string.IsNullOrWhiteSpace(note) ? "" : $" | {note}";
             string etaText = FormatEstimatedRemaining(processed, total, elapsed);
 
+            lock (_progressSnapshotLock)
+            {
+                _progressSnapshot.Stage = $"{section}: {processed}/{total}{productText}";
+                _progressSnapshot.Section = section;
+                _progressSnapshot.ProductName = productName ?? string.Empty;
+                _progressSnapshot.Note = note ?? string.Empty;
+                _progressSnapshot.Processed = processed;
+                _progressSnapshot.Total = total;
+                _progressSnapshot.Progress = progress;
+                _progressSnapshot.Elapsed = elapsed;
+                _progressSnapshot.Eta = etaText;
+            }
+
             Dispatcher.InvokeAsync((Action)delegate
             {
                 StageText.Text = $"Текущий этап: {section}: {processed}/{total}{productText}";
@@ -1128,6 +1194,11 @@ namespace Hotline_Main_Parsing
 
         private void SetStatus(string text, string background, string foreground)
         {
+            lock (_progressSnapshotLock)
+            {
+                _progressSnapshot.Status = text;
+            }
+
             StatusText.Text = text;
             StatusBadge.Background = CreateBrush(background);
             StatusText.Foreground = CreateBrush(foreground);
@@ -1183,11 +1254,233 @@ namespace Hotline_Main_Parsing
                 Console.WriteLine(e.Message);
             }
         }
+
+        private void StartTelegramStatusListener()
+        {
+            if (_telegramStatusTask != null)
+            {
+                return;
+            }
+
+            _telegramStatusCts = new CancellationTokenSource();
+            _telegramStatusTask = Task.Run(() => TelegramStatusListenerLoopAsync(_telegramStatusCts.Token));
+        }
+
+        private async Task TelegramStatusListenerLoopAsync(CancellationToken cancellationToken)
+        {
+            while (!cancellationToken.IsCancellationRequested)
+            {
+                try
+                {
+                    var config = new ConfigurationBuilder().AddJsonFile("appsettings.json", optional: true).Build();
+                    bool enabled = !bool.TryParse(config["TelegramStatusEnabled"], out bool statusEnabled) || statusEnabled;
+                    string? botToken = config["Bot_Token"];
+                    string[] ids = GetTelegramIds(config);
+
+                    if (enabled && !string.IsNullOrWhiteSpace(botToken) && ids.Length > 0 && !botToken.StartsWith("PUT_", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (!string.Equals(_telegramStatusBotToken, botToken, StringComparison.Ordinal))
+                        {
+                            _telegramStatusBotToken = botToken;
+                            _telegramStatusOffset = 0;
+                            _telegramStatusInitialized = false;
+                        }
+
+                        await PollTelegramStatusCommandsAsync(botToken, ids, cancellationToken);
+                    }
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    SafeAppendText("logs.txt", $"\n[Telegram status] {ex.Message} - {ex.StackTrace}\n");
+                }
+
+                try
+                {
+                    await Task.Delay(TelegramStatusPollInterval, cancellationToken);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+            }
+        }
+
+        private async Task PollTelegramStatusCommandsAsync(string botToken, string[] allowedIds, CancellationToken cancellationToken)
+        {
+            string url = $"https://api.telegram.org/bot{botToken}/getUpdates?offset={_telegramStatusOffset}&timeout=0&limit=20";
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Add("User-Agent", "Hotline Parser Telegram Status");
+
+            string responseText = await httpClient.GetStringAsync(url, cancellationToken);
+            var response = JObject.Parse(responseText);
+            if (response["ok"]?.Value<bool>() != true || response["result"] is not JArray updates)
+            {
+                return;
+            }
+
+            if (!_telegramStatusInitialized)
+            {
+                if (updates.Count > 0)
+                {
+                    int lastUpdateId = updates
+                        .Select(update => update["update_id"]?.Value<int>() ?? 0)
+                        .DefaultIfEmpty(0)
+                        .Max();
+                    _telegramStatusOffset = lastUpdateId + 1;
+                }
+
+                _telegramStatusInitialized = true;
+                return;
+            }
+
+            foreach (JToken update in updates)
+            {
+                int updateId = update["update_id"]?.Value<int>() ?? 0;
+                if (updateId > 0)
+                {
+                    _telegramStatusOffset = Math.Max(_telegramStatusOffset, updateId + 1);
+                }
+
+                JToken? message = update["message"] ?? update["edited_message"];
+                string? text = message?["text"]?.ToString();
+                JToken? chat = message?["chat"];
+                string? chatId = chat?["id"]?.ToString();
+
+                if (string.IsNullOrWhiteSpace(chatId) || !IsAllowedTelegramChat(chat, allowedIds) || !IsTelegramStatusCommand(text))
+                {
+                    continue;
+                }
+
+                string statusMessage = BuildTelegramStatusMessage();
+                await SendMessageToChatAsync(statusMessage, botToken, chatId, cancellationToken);
+            }
+        }
+
+        private static bool IsAllowedTelegramChat(JToken? chat, string[] allowedIds)
+        {
+            if (chat == null)
+            {
+                return false;
+            }
+
+            var allowed = new HashSet<string>(
+                allowedIds.Where(id => !string.IsNullOrWhiteSpace(id)).Select(id => id.Trim()),
+                StringComparer.OrdinalIgnoreCase);
+
+            string? chatId = chat["id"]?.ToString();
+            if (!string.IsNullOrWhiteSpace(chatId) && allowed.Contains(chatId))
+            {
+                return true;
+            }
+
+            string? username = chat["username"]?.ToString();
+            if (string.IsNullOrWhiteSpace(username))
+            {
+                return false;
+            }
+
+            return allowed.Contains(username) || allowed.Contains("@" + username);
+        }
+
+        private static bool IsTelegramStatusCommand(string? text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            string command = text.Trim().Split(new[] { ' ', '\r', '\n', '\t' }, StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+            int botNameIndex = command.IndexOf('@');
+            if (botNameIndex >= 0)
+            {
+                command = command.Substring(0, botNameIndex);
+            }
+
+            command = command.Trim().ToLowerInvariant();
+            return command is "статус" or "стасус" or "/статус" or "/status" or "status";
+        }
+
+        private string BuildTelegramStatusMessage()
+        {
+            ProgressSnapshot snapshot = GetProgressSnapshot();
+            int processedTotal = Volatile.Read(ref _processedProducts);
+            int changedPrices = Volatile.Read(ref _changedPrices);
+            int errors = Volatile.Read(ref _errorCount);
+            TimeSpan elapsed = _runStopwatch?.Elapsed ?? snapshot.Elapsed;
+            string state = snapshot.Status;
+            string progressText = snapshot.Total > 0
+                ? $"{snapshot.Progress:0}% ({snapshot.Processed}/{snapshot.Total})"
+                : "н/д";
+            string productText = TruncateForTelegram(snapshot.ProductName, 160);
+            string noteText = string.IsNullOrWhiteSpace(snapshot.Note) ? string.Empty : $" ({snapshot.Note})";
+
+            var builder = new StringBuilder();
+            builder.AppendLine("Статус Hotline Parser");
+            builder.AppendLine($"Состояние: {state}");
+            builder.AppendLine($"Этап: {snapshot.Stage}{noteText}");
+            builder.AppendLine($"Прогресс: {progressText}");
+            builder.AppendLine($"Осталось: {(snapshot.Total > 0 ? snapshot.Eta : "н/д")}");
+            builder.AppendLine($"Прошло: {elapsed:hh\\:mm\\:ss}");
+            builder.AppendLine($"Обработано всего: {processedTotal}");
+            builder.AppendLine($"Цен сменилось: {changedPrices}");
+            builder.AppendLine($"Ошибок: {errors}");
+
+            if (!string.IsNullOrWhiteSpace(productText))
+            {
+                builder.AppendLine($"Товар: {productText}");
+            }
+
+            return builder.ToString().Trim();
+        }
+
+        private ProgressSnapshot GetProgressSnapshot()
+        {
+            lock (_progressSnapshotLock)
+            {
+                return new ProgressSnapshot
+                {
+                    Status = _progressSnapshot.Status,
+                    Stage = _progressSnapshot.Stage,
+                    Section = _progressSnapshot.Section,
+                    ProductName = _progressSnapshot.ProductName,
+                    Note = _progressSnapshot.Note,
+                    Processed = _progressSnapshot.Processed,
+                    Total = _progressSnapshot.Total,
+                    Progress = _progressSnapshot.Progress,
+                    Elapsed = _progressSnapshot.Elapsed,
+                    Eta = _progressSnapshot.Eta
+                };
+            }
+        }
+
+        private static string TruncateForTelegram(string value, int maxLength)
+        {
+            if (string.IsNullOrWhiteSpace(value) || value.Length <= maxLength)
+            {
+                return value;
+            }
+
+            return value.Substring(0, Math.Max(0, maxLength - 3)) + "...";
+        }
+
+        private static string[] GetTelegramIds(IConfiguration config)
+        {
+            return config.GetSection("Ids")?
+                .AsEnumerable()
+                .Where(p => !string.IsNullOrWhiteSpace(p.Value))
+                .Select(p => p.Value!.Trim())
+                .ToArray() ?? Array.Empty<string>();
+        }
+
         private async Task SendTelegramTemplateAsync(string templateKey, string fallbackMessage, ParsingSectionStats? stats = null)
         {
             var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
             var token = config["Bot_Token"];
-            var ids = config.GetSection("Ids")?.AsEnumerable().Where(p => p.Value != null).Select(p => p.Value.ToString()).ToArray() ?? new string[0];
+            var ids = GetTelegramIds(config);
 
             if (string.IsNullOrWhiteSpace(token) || ids.Length == 0)
             {
@@ -1245,6 +1538,21 @@ namespace Hotline_Main_Parsing
             }
         }
 
+        private static async Task SendMessageToChatAsync(string message, string token, string chatId, CancellationToken cancellationToken)
+        {
+            using var httpClient = new HttpClient();
+            httpClient.DefaultRequestHeaders.Add("User-Agent", "Hotline Parser Telegram Status");
+            var messageUrl = $"https://api.telegram.org/bot{token}/sendMessage";
+            var postData = new FormUrlEncodedContent(new Dictionary<string, string>
+            {
+                ["chat_id"] = chatId,
+                ["text"] = message
+            });
+
+            var resp = await httpClient.PostAsync(messageUrl, postData, cancellationToken);
+            resp.EnsureSuccessStatusCode();
+        }
+
         private async Task SendMorningReportIfNeededAsync()
         {
             var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
@@ -1271,7 +1579,7 @@ namespace Hotline_Main_Parsing
             }
 
             var token = config["Bot_Token"];
-            var ids = config.GetSection("Ids")?.AsEnumerable().Where(p => p.Value != null).Select(p => p.Value.ToString()).ToArray() ?? new string[0];
+            var ids = GetTelegramIds(config);
             if (string.IsNullOrWhiteSpace(token) || ids.Length == 0)
             {
                 return;
