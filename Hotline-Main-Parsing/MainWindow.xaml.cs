@@ -56,6 +56,7 @@ namespace Hotline_Main_Parsing
         private int _errorCount;
         private bool _isNormalizingOrientir;
         private bool _wasTopmostBeforeSettings;
+        private int _immediateStopRequested;
         private const int MaxVisibleLogItems = 700;
         private readonly ObservableCollection<VisibleLogEntry> _visibleLogEntries = new();
         private readonly DispatcherTimer _resourceMonitorTimer = new();
@@ -218,6 +219,7 @@ namespace Hotline_Main_Parsing
             }
 
             _tokenSource = new CancellationTokenSource();
+            Interlocked.Exchange(ref _immediateStopRequested, 0);
             BeginRunLog();
             _parsingTask = Task.Run(() => MainMethodParsingHotlineAsync(_tokenSource.Token));
             bStart.IsEnabled = false;
@@ -261,19 +263,37 @@ namespace Hotline_Main_Parsing
             }
         }
 
-        private void bStop_Click(object sender, RoutedEventArgs e)
+        private async void bStop_Click(object sender, RoutedEventArgs e)
         {
-            if (_tokenSource == null || _tokenSource.IsCancellationRequested)
+            await RequestImmediateStopAsync("Остановка кнопкой");
+        }
+
+        private async Task RequestImmediateStopAsync(string source)
+        {
+            if (_tokenSource == null || !IsParsingActive)
             {
                 return;
             }
 
             _worker.ReportProgress(0);
             _tokenSource.Cancel();
-            bStop.IsEnabled = false;
-            SetStatus("Останавливается", "#FEF3C7", "#92400E");
-            SetStage("останавливаю после текущего товара");
-            AppendLog("Остановка запрошена. Парсер остановится после текущего товара и закроет браузер.");
+            ClearTelegramPause();
+
+            await Dispatcher.InvokeAsync((Action)delegate
+            {
+                bStop.IsEnabled = false;
+                SetStatus("Останавливается", "#FEF3C7", "#92400E");
+                SetStage("останавливаю: закрываю браузеры");
+            });
+
+            if (Interlocked.Exchange(ref _immediateStopRequested, 1) != 0)
+            {
+                return;
+            }
+
+            AppendLog($"{source}: остановка запрошена. Закрываю браузеры сразу.");
+            await CloseAllBrowser();
+            AppendLog("Браузеры закрыты. Парсер завершит остановку без записи неполного результата.");
         }
 
         private async Task MainMethodParsingHotlineAsync(CancellationToken cancellationToken)
@@ -2300,17 +2320,8 @@ namespace Hotline_Main_Parsing
                 return "Парсер сейчас не запущен.";
             }
 
-            _tokenSource.Cancel();
-            ClearTelegramPause();
-            await Dispatcher.InvokeAsync((Action)delegate
-            {
-                bStop.IsEnabled = false;
-                SetStatus("Останавливается", "#FEF3C7", "#92400E");
-                SetStage("остановка из Telegram");
-            });
-
-            AppendLog("Telegram: получена команда /stop. Остановка после текущего товара.");
-            return "Остановка запрошена. Парсер остановится после текущего товара и закроет браузер.";
+            await RequestImmediateStopAsync("Telegram: получена команда /stop");
+            return "Остановка запрошена. Браузеры закрываются сразу.";
         }
 
         private string RequestPauseFromTelegram(int minutes)
@@ -3043,6 +3054,12 @@ namespace Hotline_Main_Parsing
                     }
                 });
 
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    AppendLog("Смартфоны: остановлено пользователем, неполный результат не записываю.");
+                    return stats;
+                }
+
                 // Этот код теперь должен выполниться без зависания
                 File.WriteAllText("mock.json", JsonConvert.SerializeObject(productsInSheet.ToList()));
                 AppendLog("Смартфоны: не обработано - " + (indexes.Count - productsInSheet.Count));
@@ -3484,6 +3501,12 @@ namespace Hotline_Main_Parsing
                         }
                     }
                 });
+
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    AppendLog("Аксессуары: остановлено пользователем, неполный результат не записываю.");
+                    return stats;
+                }
 
                 // Ваша логика пост-обработки
                 if (lastPluses != null)
