@@ -24,6 +24,7 @@ using System.Globalization;
 using Hotline_Main_Parsing.validmodel;
 using System.Linq;
 using System.Net;
+using System.Security.Principal;
 using System.Text.RegularExpressions;
 using PuppeteerSharp;
 using System.Collections.Concurrent;
@@ -62,6 +63,7 @@ namespace Hotline_Main_Parsing
         private DateTime _lastResourceSampleUtc = DateTime.UtcNow;
         private DateTime _lastTemperatureSampleUtc = DateTime.MinValue;
         private double? _lastTemperatureCelsius;
+        private string _lastTemperatureStatus = "ожидание замера";
         private readonly object _resourceSnapshotLock = new object();
         private readonly ResourceSnapshot _resourceSnapshot = new();
         private readonly object _progressSnapshotLock = new object();
@@ -106,7 +108,14 @@ namespace Hotline_Main_Parsing
             public long ChromeRamBytes { get; set; }
             public int ChromeCount { get; set; }
             public double? TemperatureCelsius { get; set; }
+            public string TemperatureStatus { get; set; } = string.Empty;
             public DateTime SampleUtc { get; set; }
+        }
+
+        private sealed class TemperatureReadResult
+        {
+            public double? Celsius { get; init; }
+            public string Status { get; init; } = string.Empty;
         }
 
         private sealed class ProgressSnapshot
@@ -1111,6 +1120,7 @@ namespace Hotline_Main_Parsing
                     _resourceSnapshot.ChromeRamBytes = chromeRam;
                     _resourceSnapshot.ChromeCount = chromeCount;
                     _resourceSnapshot.TemperatureCelsius = temperature;
+                    _resourceSnapshot.TemperatureStatus = _lastTemperatureStatus;
                     _resourceSnapshot.SampleUtc = now;
                 }
 
@@ -1127,6 +1137,7 @@ namespace Hotline_Main_Parsing
                 lock (_resourceSnapshotLock)
                 {
                     _resourceSnapshot.Available = false;
+                    _resourceSnapshot.TemperatureStatus = "ошибка чтения нагрузки";
                     _resourceSnapshot.SampleUtc = DateTime.UtcNow;
                 }
             }
@@ -1136,7 +1147,9 @@ namespace Hotline_Main_Parsing
         {
             if ((nowUtc - _lastTemperatureSampleUtc).TotalSeconds >= 10)
             {
-                _lastTemperatureCelsius = TryReadTemperatureCelsius();
+                TemperatureReadResult temperatureResult = TryReadTemperatureCelsius();
+                _lastTemperatureCelsius = temperatureResult.Celsius;
+                _lastTemperatureStatus = temperatureResult.Status;
                 _lastTemperatureSampleUtc = nowUtc;
             }
 
@@ -1145,31 +1158,67 @@ namespace Hotline_Main_Parsing
                 double temperature = _lastTemperatureCelsius.Value;
                 TemperatureText.Text = $"{temperature:0}°C";
                 TemperatureText.Foreground = CreateBrush(temperature >= 85 ? "#DC2626" : temperature >= 75 ? "#D97706" : "#166534");
+                TemperatureText.ToolTip = _lastTemperatureStatus;
             }
             else
             {
-                TemperatureText.Text = "н/д";
+                TemperatureText.Text = IsRunningAsAdministrator() ? "н/д" : "админ?";
                 TemperatureText.Foreground = CreateBrush("#8EA0BA");
+                TemperatureText.ToolTip = _lastTemperatureStatus;
             }
 
             return _lastTemperatureCelsius;
         }
 
-        private static double? TryReadTemperatureCelsius()
+        private static TemperatureReadResult TryReadTemperatureCelsius()
         {
             double? embeddedHardwareTemperature = TryReadEmbeddedHardwareTemperatureCelsius();
             if (embeddedHardwareTemperature.HasValue)
             {
-                return embeddedHardwareTemperature;
+                return new TemperatureReadResult
+                {
+                    Celsius = embeddedHardwareTemperature,
+                    Status = "температура прочитана из встроенных датчиков"
+                };
+            }
+
+            double? nvidiaTemperature = TryReadNvidiaSmiTemperatureCelsius();
+            if (nvidiaTemperature.HasValue)
+            {
+                return new TemperatureReadResult
+                {
+                    Celsius = nvidiaTemperature,
+                    Status = "температура прочитана через NVIDIA"
+                };
             }
 
             double? hardwareMonitorTemperature = TryReadHardwareMonitorTemperatureCelsius();
             if (hardwareMonitorTemperature.HasValue)
             {
-                return hardwareMonitorTemperature;
+                return new TemperatureReadResult
+                {
+                    Celsius = hardwareMonitorTemperature,
+                    Status = "температура прочитана через Hardware Monitor"
+                };
             }
 
-            return TryReadAcpiTemperatureCelsius();
+            double? acpiTemperature = TryReadAcpiTemperatureCelsius();
+            if (acpiTemperature.HasValue)
+            {
+                return new TemperatureReadResult
+                {
+                    Celsius = acpiTemperature,
+                    Status = "температура прочитана через Windows ACPI"
+                };
+            }
+
+            return new TemperatureReadResult
+            {
+                Celsius = null,
+                Status = IsRunningAsAdministrator()
+                    ? "датчики температуры не найдены или не отдаются Windows"
+                    : "нет доступа к датчикам: запустите программу от имени администратора"
+            };
         }
 
         private static double? TryReadEmbeddedHardwareTemperatureCelsius()
@@ -1183,12 +1232,12 @@ namespace Hotline_Main_Parsing
                     IsCpuEnabled = true,
                     IsGpuEnabled = true,
                     IsMotherboardEnabled = true,
-                    IsMemoryEnabled = false,
-                    IsStorageEnabled = false,
+                    IsMemoryEnabled = true,
+                    IsStorageEnabled = true,
                     IsNetworkEnabled = false,
-                    IsControllerEnabled = false,
+                    IsControllerEnabled = true,
                     IsPsuEnabled = false,
-                    IsBatteryEnabled = false
+                    IsBatteryEnabled = true
                 };
 
                 computer.Open();
@@ -1235,6 +1284,80 @@ namespace Hotline_Main_Parsing
             {
                 ReadHardwareTemperatures(subHardware, temperatures);
             }
+        }
+
+        private static double? TryReadNvidiaSmiTemperatureCelsius()
+        {
+            var candidates = new[]
+            {
+                Environment.ExpandEnvironmentVariables(@"%ProgramFiles%\NVIDIA Corporation\NVSMI\nvidia-smi.exe"),
+                Environment.ExpandEnvironmentVariables(@"%ProgramW6432%\NVIDIA Corporation\NVSMI\nvidia-smi.exe"),
+                "nvidia-smi.exe"
+            };
+
+            foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    bool isPath = candidate.Contains('\\') || candidate.Contains('/');
+                    if (isPath && !File.Exists(candidate))
+                    {
+                        continue;
+                    }
+
+                    using var process = new Process();
+                    process.StartInfo = new ProcessStartInfo
+                    {
+                        FileName = candidate,
+                        Arguments = "--query-gpu=temperature.gpu --format=csv,noheader,nounits",
+                        UseShellExecute = false,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        CreateNoWindow = true
+                    };
+
+                    process.Start();
+                    string output = process.StandardOutput.ReadToEnd();
+                    if (!process.WaitForExit(1500))
+                    {
+                        try
+                        {
+                            process.Kill();
+                        }
+                        catch
+                        {
+                            // Process may exit between timeout and kill.
+                        }
+
+                        continue;
+                    }
+
+                    var temperatures = new List<double>();
+                    foreach (string line in output.Split(new[] { '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        string value = line.Trim();
+                        if (double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double celsius) ||
+                            double.TryParse(value, NumberStyles.Float, CultureInfo.CurrentCulture, out celsius))
+                        {
+                            if (celsius > 0 && celsius < 130)
+                            {
+                                temperatures.Add(celsius);
+                            }
+                        }
+                    }
+
+                    if (temperatures.Count > 0)
+                    {
+                        return temperatures.Max();
+                    }
+                }
+                catch
+                {
+                    // NVIDIA utility is optional and may not exist on this PC.
+                }
+            }
+
+            return null;
         }
 
         private static double? TryReadHardwareMonitorTemperatureCelsius()
@@ -1313,6 +1436,20 @@ namespace Hotline_Main_Parsing
             catch
             {
                 return null;
+            }
+        }
+
+        private static bool IsRunningAsAdministrator()
+        {
+            try
+            {
+                using WindowsIdentity identity = WindowsIdentity.GetCurrent();
+                var principal = new WindowsPrincipal(identity);
+                return principal.IsInRole(WindowsBuiltInRole.Administrator);
+            }
+            catch
+            {
+                return false;
             }
         }
 
@@ -1971,7 +2108,7 @@ namespace Hotline_Main_Parsing
 
             string temperature = snapshot.TemperatureCelsius.HasValue
                 ? $"{snapshot.TemperatureCelsius.Value:0}°C"
-                : "н/д";
+                : $"н/д ({snapshot.TemperatureStatus})";
 
             var builder = new StringBuilder();
             builder.AppendLine("Нагрузка Hotline Parser");
@@ -2015,6 +2152,7 @@ namespace Hotline_Main_Parsing
                     ChromeRamBytes = _resourceSnapshot.ChromeRamBytes,
                     ChromeCount = _resourceSnapshot.ChromeCount,
                     TemperatureCelsius = _resourceSnapshot.TemperatureCelsius,
+                    TemperatureStatus = _resourceSnapshot.TemperatureStatus,
                     SampleUtc = _resourceSnapshot.SampleUtc
                 };
             }
