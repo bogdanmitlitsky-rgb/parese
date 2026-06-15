@@ -1172,7 +1172,10 @@ namespace Hotline_Main_Parsing
 
         private static TemperatureReadResult TryReadTemperatureCelsius()
         {
-            double? embeddedHardwareTemperature = TryReadEmbeddedHardwareTemperatureCelsius();
+            var diagnostics = new List<string>();
+
+            double? embeddedHardwareTemperature = TryReadEmbeddedHardwareTemperatureCelsius(out string embeddedHardwareStatus);
+            diagnostics.Add(embeddedHardwareStatus);
             if (embeddedHardwareTemperature.HasValue)
             {
                 return new TemperatureReadResult
@@ -1182,7 +1185,8 @@ namespace Hotline_Main_Parsing
                 };
             }
 
-            double? nvidiaTemperature = TryReadNvidiaSmiTemperatureCelsius();
+            double? nvidiaTemperature = TryReadNvidiaSmiTemperatureCelsius(out string nvidiaStatus);
+            diagnostics.Add(nvidiaStatus);
             if (nvidiaTemperature.HasValue)
             {
                 return new TemperatureReadResult
@@ -1192,7 +1196,8 @@ namespace Hotline_Main_Parsing
                 };
             }
 
-            double? hardwareMonitorTemperature = TryReadHardwareMonitorTemperatureCelsius();
+            double? hardwareMonitorTemperature = TryReadHardwareMonitorTemperatureCelsius(out string hardwareMonitorStatus);
+            diagnostics.Add(hardwareMonitorStatus);
             if (hardwareMonitorTemperature.HasValue)
             {
                 return new TemperatureReadResult
@@ -1202,7 +1207,8 @@ namespace Hotline_Main_Parsing
                 };
             }
 
-            double? acpiTemperature = TryReadAcpiTemperatureCelsius();
+            double? acpiTemperature = TryReadAcpiTemperatureCelsius(out string acpiStatus);
+            diagnostics.Add(acpiStatus);
             if (acpiTemperature.HasValue)
             {
                 return new TemperatureReadResult
@@ -1216,12 +1222,12 @@ namespace Hotline_Main_Parsing
             {
                 Celsius = null,
                 Status = IsRunningAsAdministrator()
-                    ? "датчики температуры не найдены или не отдаются Windows"
-                    : "нет доступа к датчикам: запустите программу от имени администратора"
+                    ? $"температура недоступна: {string.Join("; ", diagnostics.Where(item => !string.IsNullOrWhiteSpace(item)))}"
+                    : $"температура недоступна: программа не запущена от администратора; {string.Join("; ", diagnostics.Where(item => !string.IsNullOrWhiteSpace(item)))}"
             };
         }
 
-        private static double? TryReadEmbeddedHardwareTemperatureCelsius()
+        private static double? TryReadEmbeddedHardwareTemperatureCelsius(out string status)
         {
             Computer? computer = null;
             try
@@ -1246,10 +1252,18 @@ namespace Hotline_Main_Parsing
                     ReadHardwareTemperatures(hardware, temperatures);
                 }
 
-                return temperatures.Count == 0 ? null : temperatures.Max();
+                if (temperatures.Count == 0)
+                {
+                    status = $"встроенные датчики: 0 значений, устройств: {computer.Hardware.Count}";
+                    return null;
+                }
+
+                status = $"встроенные датчики: найдено {temperatures.Count}";
+                return temperatures.Max();
             }
-            catch
+            catch (Exception ex)
             {
+                status = $"встроенные датчики: ошибка {GetShortExceptionMessage(ex)}";
                 return null;
             }
             finally
@@ -1286,7 +1300,7 @@ namespace Hotline_Main_Parsing
             }
         }
 
-        private static double? TryReadNvidiaSmiTemperatureCelsius()
+        private static double? TryReadNvidiaSmiTemperatureCelsius(out string status)
         {
             var candidates = new[]
             {
@@ -1295,6 +1309,8 @@ namespace Hotline_Main_Parsing
                 "nvidia-smi.exe"
             };
 
+            bool executableFound = false;
+            string? lastError = null;
             foreach (string candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 try
@@ -1305,6 +1321,7 @@ namespace Hotline_Main_Parsing
                         continue;
                     }
 
+                    executableFound = true;
                     using var process = new Process();
                     process.StartInfo = new ProcessStartInfo
                     {
@@ -1329,6 +1346,7 @@ namespace Hotline_Main_Parsing
                             // Process may exit between timeout and kill.
                         }
 
+                        lastError = "таймаут";
                         continue;
                     }
 
@@ -1348,20 +1366,29 @@ namespace Hotline_Main_Parsing
 
                     if (temperatures.Count > 0)
                     {
+                        status = "NVIDIA: температура найдена";
                         return temperatures.Max();
                     }
+
+                    string error = process.StandardError.ReadToEnd().Trim();
+                    lastError = string.IsNullOrWhiteSpace(error) ? "температура не найдена" : error;
                 }
-                catch
+                catch (Exception ex)
                 {
+                    lastError = GetShortExceptionMessage(ex);
                     // NVIDIA utility is optional and may not exist on this PC.
                 }
             }
 
+            status = executableFound
+                ? $"NVIDIA: {lastError ?? "температура не найдена"}"
+                : "NVIDIA: nvidia-smi не найден";
             return null;
         }
 
-        private static double? TryReadHardwareMonitorTemperatureCelsius()
+        private static double? TryReadHardwareMonitorTemperatureCelsius(out string status)
         {
+            var diagnostics = new List<string>();
             foreach (string scope in new[] { @"root\LibreHardwareMonitor", @"root\OpenHardwareMonitor" })
             {
                 try
@@ -1391,19 +1418,24 @@ namespace Hotline_Main_Parsing
 
                     if (temperatures.Count > 0)
                     {
+                        status = $"{scope}: найдено {temperatures.Count}";
                         return temperatures.Max();
                     }
+
+                    diagnostics.Add($"{scope}: 0 значений");
                 }
-                catch
+                catch (Exception ex)
                 {
+                    diagnostics.Add($"{scope}: {GetShortExceptionMessage(ex)}");
                     // Hardware monitor providers are optional.
                 }
             }
 
+            status = string.Join(", ", diagnostics);
             return null;
         }
 
-        private static double? TryReadAcpiTemperatureCelsius()
+        private static double? TryReadAcpiTemperatureCelsius(out string status)
         {
             try
             {
@@ -1431,12 +1463,32 @@ namespace Hotline_Main_Parsing
                     }
                 }
 
-                return temperatures.Count == 0 ? null : temperatures.Max();
+                if (temperatures.Count == 0)
+                {
+                    status = "Windows ACPI: 0 значений";
+                    return null;
+                }
+
+                status = $"Windows ACPI: найдено {temperatures.Count}";
+                return temperatures.Max();
             }
-            catch
+            catch (Exception ex)
             {
+                status = $"Windows ACPI: {GetShortExceptionMessage(ex)}";
                 return null;
             }
+        }
+
+        private static string GetShortExceptionMessage(Exception ex)
+        {
+            string message = ex.Message;
+            if (string.IsNullOrWhiteSpace(message))
+            {
+                message = ex.GetType().Name;
+            }
+
+            message = message.Replace("\r", " ").Replace("\n", " ").Trim();
+            return message.Length <= 90 ? message : message[..90] + "...";
         }
 
         private static bool IsRunningAsAdministrator()
