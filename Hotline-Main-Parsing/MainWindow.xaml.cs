@@ -3147,7 +3147,7 @@ namespace Hotline_Main_Parsing
                 Console.WriteLine(ex.Message);
                 throw;
             }
-            if(!product.OffersLoaded && product.Shops.Count == 0 && count < 15)
+            if(product.Shops.Count == 0 && count < 15)
             {
                 count++;
                 await ChangeIP(managerHotline.changeLink);
