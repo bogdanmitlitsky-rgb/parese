@@ -27,6 +27,7 @@ using System.Text.RegularExpressions;
 using PuppeteerSharp;
 using System.Collections.Concurrent;
 using System.Windows.Media;
+using System.Management;
 using DefaultSheets = Hotline_Main_Parsing.@default;
 
 namespace Hotline_Main_Parsing
@@ -58,6 +59,8 @@ namespace Hotline_Main_Parsing
         private readonly DispatcherTimer _resourceMonitorTimer = new();
         private readonly Dictionary<int, TimeSpan> _lastCpuByProcess = new();
         private DateTime _lastResourceSampleUtc = DateTime.UtcNow;
+        private DateTime _lastTemperatureSampleUtc = DateTime.MinValue;
+        private double? _lastTemperatureCelsius;
         private readonly object _progressSnapshotLock = new object();
         private readonly ProgressSnapshot _progressSnapshot = new();
         private CancellationTokenSource? _telegramStatusCts;
@@ -921,6 +924,7 @@ namespace Hotline_Main_Parsing
                 CpuUsageText.Text = $"{Math.Min(999, totalCpu):0}%";
                 RamUsageText.Text = FormatMemory(appRam);
                 ChromeUsageText.Text = $"{chromeCount} / {FormatMemory(chromeRam)}";
+                UpdateTemperatureUsage(now);
 
                 CpuUsageText.Foreground = CreateBrush(totalCpu >= 80 ? "#DC2626" : totalCpu >= 50 ? "#D97706" : "#166534");
                 RamUsageText.Foreground = CreateBrush(appRam >= 800L * 1024 * 1024 ? "#DC2626" : appRam >= 300L * 1024 * 1024 ? "#D97706" : "#166534");
@@ -931,6 +935,118 @@ namespace Hotline_Main_Parsing
                 CpuUsageText.Text = "н/д";
                 RamUsageText.Text = "н/д";
                 ChromeUsageText.Text = "н/д";
+                TemperatureText.Text = "н/д";
+            }
+        }
+
+        private void UpdateTemperatureUsage(DateTime nowUtc)
+        {
+            if ((nowUtc - _lastTemperatureSampleUtc).TotalSeconds >= 10)
+            {
+                _lastTemperatureCelsius = TryReadTemperatureCelsius();
+                _lastTemperatureSampleUtc = nowUtc;
+            }
+
+            if (_lastTemperatureCelsius.HasValue)
+            {
+                double temperature = _lastTemperatureCelsius.Value;
+                TemperatureText.Text = $"{temperature:0}°C";
+                TemperatureText.Foreground = CreateBrush(temperature >= 85 ? "#DC2626" : temperature >= 75 ? "#D97706" : "#166534");
+            }
+            else
+            {
+                TemperatureText.Text = "н/д";
+                TemperatureText.Foreground = CreateBrush("#8EA0BA");
+            }
+        }
+
+        private static double? TryReadTemperatureCelsius()
+        {
+            double? hardwareMonitorTemperature = TryReadHardwareMonitorTemperatureCelsius();
+            if (hardwareMonitorTemperature.HasValue)
+            {
+                return hardwareMonitorTemperature;
+            }
+
+            return TryReadAcpiTemperatureCelsius();
+        }
+
+        private static double? TryReadHardwareMonitorTemperatureCelsius()
+        {
+            foreach (string scope in new[] { @"root\LibreHardwareMonitor", @"root\OpenHardwareMonitor" })
+            {
+                try
+                {
+                    using var searcher = new ManagementObjectSearcher(
+                        scope,
+                        "SELECT Name, SensorType, Value FROM Sensor WHERE SensorType = 'Temperature'");
+
+                    var temperatures = new List<double>();
+                    foreach (ManagementObject item in searcher.Get())
+                    {
+                        using (item)
+                        {
+                            object? rawValue = item["Value"];
+                            if (rawValue == null)
+                            {
+                                continue;
+                            }
+
+                            double celsius = Convert.ToDouble(rawValue, CultureInfo.InvariantCulture);
+                            if (celsius > 0 && celsius < 130)
+                            {
+                                temperatures.Add(celsius);
+                            }
+                        }
+                    }
+
+                    if (temperatures.Count > 0)
+                    {
+                        return temperatures.Max();
+                    }
+                }
+                catch
+                {
+                    // Hardware monitor providers are optional.
+                }
+            }
+
+            return null;
+        }
+
+        private static double? TryReadAcpiTemperatureCelsius()
+        {
+            try
+            {
+                using var searcher = new ManagementObjectSearcher(
+                    @"root\WMI",
+                    "SELECT CurrentTemperature FROM MSAcpi_ThermalZoneTemperature");
+
+                var temperatures = new List<double>();
+                foreach (ManagementObject item in searcher.Get())
+                {
+                    using (item)
+                    {
+                        object? rawValue = item["CurrentTemperature"];
+                        if (rawValue == null)
+                        {
+                            continue;
+                        }
+
+                        double kelvinTenth = Convert.ToDouble(rawValue, CultureInfo.InvariantCulture);
+                        double celsius = kelvinTenth / 10.0 - 273.15;
+                        if (celsius > 0 && celsius < 130)
+                        {
+                            temperatures.Add(celsius);
+                        }
+                    }
+                }
+
+                return temperatures.Count == 0 ? null : temperatures.Max();
+            }
+            catch
+            {
+                return null;
             }
         }
 

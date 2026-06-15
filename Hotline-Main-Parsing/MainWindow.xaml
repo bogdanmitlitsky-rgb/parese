@@ -168,7 +168,8 @@
                             BorderBrush="#2C3E5F"
                             BorderThickness="1"
                             CornerRadius="8"
-                            Padding="8,5">
+                            Padding="8,5"
+                            Margin="0,0,8,0">
                         <StackPanel>
                             <TextBlock Text="Chrome"
                                        Foreground="#8EA0BA"
@@ -179,6 +180,26 @@
                                        FontSize="13"
                                        FontWeight="Bold"
                                        Margin="0,2,0,0" />
+                        </StackPanel>
+                    </Border>
+
+                    <Border Width="78"
+                            Height="42"
+                            Background="#17243A"
+                            BorderBrush="#2C3E5F"
+                            BorderThickness="1"
+                            CornerRadius="8"
+                            Padding="8,5">
+                        <StackPanel>
+                            <TextBlock Text="Темп."
+                                       Foreground="#8EA0BA"
+                                       FontSize="10" />
+                            <TextBlock x:Name="TemperatureText"
+                                       Text="н/д"
+                                       Foreground="#86EFAC"
+                                       FontSize="14"
+                                       FontWeight="Bold"
+                                       Margin="0,1,0,0" />
                         </StackPanel>
                     </Border>
                 </WrapPanel>
