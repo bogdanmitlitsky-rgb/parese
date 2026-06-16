@@ -84,6 +84,7 @@ namespace Hotline_Main_Parsing
             public string ScopeText { get; init; } = string.Empty;
             public string MessageText { get; init; } = string.Empty;
             public string StatusText { get; init; } = string.Empty;
+            public string RrcPriceText { get; init; } = string.Empty;
             public string OldPriceText { get; init; } = string.Empty;
             public string NewPriceText { get; init; } = string.Empty;
             public string ElapsedText { get; init; } = string.Empty;
@@ -812,6 +813,8 @@ namespace Hotline_Main_Parsing
             if (TryGetRrcPrice(row, symbols, rrcPriceColumn, out decimal bitPrice))
             {
                 productInSheet.BitPrice = bitPrice;
+                productInSheet.RrcBitPriceApplied = true;
+                productInSheet.RrcBitPrice = bitPrice;
             }
         }
 
@@ -825,6 +828,8 @@ namespace Hotline_Main_Parsing
             if (TryGetRrcPrice(row, symbols, rrcPriceColumn, out decimal bitPrice))
             {
                 productInSheet.BitPrice = bitPrice;
+                productInSheet.RrcBitPriceApplied = true;
+                productInSheet.RrcBitPrice = bitPrice;
             }
         }
 
@@ -842,6 +847,16 @@ namespace Hotline_Main_Parsing
             }
 
             return TryParseSheetPrice(GetSheetCell(row, rrcPriceIndex), out price) && price > 0;
+        }
+
+        private static string? BuildProgressNote(string? note, bool rrcBitPriceApplied, decimal? rrcBitPrice)
+        {
+            if (!rrcBitPriceApplied || !rrcBitPrice.HasValue || rrcBitPrice.Value <= 0)
+            {
+                return note;
+            }
+
+            return "РРЦ";
         }
 
         private static bool SwitchParseMarkOldToNewIfNeeded(DefaultSheets.ProductInSheet productInSheet)
@@ -959,7 +974,7 @@ namespace Hotline_Main_Parsing
 
         private void AppendProgressLog(string section, int processed, int total, string? productName, string? note, TimeSpan elapsed)
         {
-            AppendProgressLog(section, processed, total, productName, note, elapsed, null, null);
+            AppendProgressLog(section, processed, total, productName, note, elapsed, null, null, null);
         }
 
         private void AppendProgressLog(
@@ -970,7 +985,8 @@ namespace Hotline_Main_Parsing
             string? note,
             TimeSpan elapsed,
             decimal? oldPrice,
-            decimal? newPrice)
+            decimal? newPrice,
+            decimal? rrcPrice = null)
         {
             string status = string.IsNullOrWhiteSpace(note) ? "обработано" : note;
             string message = string.IsNullOrWhiteSpace(productName) ? "-" : productName;
@@ -981,14 +997,15 @@ namespace Hotline_Main_Parsing
                 status: status,
                 elapsed: elapsed.ToString(@"hh\:mm\:ss"),
                 oldPrice: oldPrice,
-                newPrice: newPrice);
+                newPrice: newPrice,
+                rrcPrice: rrcPrice);
 
             AppendVisibleLogEntry(entry);
         }
 
         private VisibleLogEntry CreateLogEntry(string scope, string message, string status, string elapsed)
         {
-            return CreateLogEntry(scope, message, status, elapsed, null, null);
+            return CreateLogEntry(scope, message, status, elapsed, null, null, null);
         }
 
         private VisibleLogEntry CreateLogEntry(
@@ -997,7 +1014,8 @@ namespace Hotline_Main_Parsing
             string status,
             string elapsed,
             decimal? oldPrice,
-            decimal? newPrice)
+            decimal? newPrice,
+            decimal? rrcPrice)
         {
             Brush accent = GetLogAccentBrush(status, message);
             Brush background = GetLogBackgroundBrush(status, message);
@@ -1011,6 +1029,7 @@ namespace Hotline_Main_Parsing
                 ScopeText = scope,
                 MessageText = message,
                 StatusText = status,
+                RrcPriceText = FormatLogPrice(rrcPrice),
                 OldPriceText = oldPriceText,
                 NewPriceText = string.IsNullOrWhiteSpace(newPriceText) ? string.Empty : $"{trendText}{newPriceText}",
                 ElapsedText = elapsed,
@@ -1164,6 +1183,11 @@ namespace Hotline_Main_Parsing
                 return CreateBrush("#16A34A");
             }
 
+            if (value.Contains("РРЦ", StringComparison.OrdinalIgnoreCase))
+            {
+                return CreateBrush("#7C3AED");
+            }
+
             return CreateBrush("#2563EB");
         }
 
@@ -1181,6 +1205,11 @@ namespace Hotline_Main_Parsing
                 value.Contains("пропуск", StringComparison.OrdinalIgnoreCase))
             {
                 return CreateBrush("#FFFBEB");
+            }
+
+            if (value.Contains("РРЦ", StringComparison.OrdinalIgnoreCase))
+            {
+                return CreateBrush("#F5F3FF");
             }
 
             return Brushes.Transparent;
@@ -2025,7 +2054,8 @@ namespace Hotline_Main_Parsing
             TimeSpan elapsed,
             string? note = null,
             decimal? oldPrice = null,
-            decimal? newPrice = null)
+            decimal? newPrice = null,
+            decimal? rrcPrice = null)
         {
             double progress = total > 0 ? processed / (double)total * 100.0 : 0;
             string productText = string.IsNullOrWhiteSpace(productName) ? "" : $" | {productName}";
@@ -2049,7 +2079,7 @@ namespace Hotline_Main_Parsing
             {
                 StageText.Text = $"Текущий этап: {section}: {processed}/{total}{productText}";
                 EtaText.Text = etaText;
-                AppendProgressLog(section, processed, total, productName, note, elapsed, oldPrice, newPrice);
+                AppendProgressLog(section, processed, total, productName, note, elapsed, oldPrice, newPrice, rrcPrice);
                 pbStatus.Value = progress;
             });
 
@@ -2899,7 +2929,16 @@ namespace Hotline_Main_Parsing
                             ApplyOrientirAsResultIfNeeded(skipped, useOrientirAsResult);
                             await ApplyRrcBitPriceIfNeeded(skipped, data, dicSymbols, RRCPrice);
                             productsInSheet.Add(skipped);
-                            UpdateProgressStage("Смартфоны", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, "нету в наличии", oldReadyPriceForLog, skipped.ReadyPrice);
+                            UpdateProgressStage(
+                                "Смартфоны",
+                                productsInSheet.Count,
+                                indexes.Count,
+                                productName,
+                                sw.Elapsed,
+                                BuildProgressNote("нету в наличии", skipped.RrcBitPriceApplied, skipped.RrcBitPrice),
+                                oldReadyPriceForLog,
+                                skipped.ReadyPrice,
+                                skipped.RrcBitPrice);
                             return;
                         }
 
@@ -2933,7 +2972,16 @@ namespace Hotline_Main_Parsing
                                 {
                                     await ApplyRrcBitPriceIfNeeded(productInSheet, data, dicSymbols, RRCPrice);
                                     productsInSheet.Add(productInSheet);
-                                    UpdateProgressStage("Смартфоны", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, "пропуск: нет ссылки", oldReadyPriceForLog, productInSheet.ReadyPrice);
+                                    UpdateProgressStage(
+                                        "Смартфоны",
+                                        productsInSheet.Count,
+                                        indexes.Count,
+                                        productName,
+                                        sw.Elapsed,
+                                        BuildProgressNote("пропуск: нет ссылки", productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
+                                        oldReadyPriceForLog,
+                                        productInSheet.ReadyPrice,
+                                        productInSheet.RrcBitPrice);
                                     return;
                                 }
 
@@ -3013,7 +3061,16 @@ namespace Hotline_Main_Parsing
                                 double sVal = (double)indexes.Count;
                                 double proc = sVal > 0 ? ((fVal / sVal) * 100.0) : 0;
 
-                                UpdateProgressStage("Смартфоны", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, null, oldReadyPriceForLog, productInSheet.ReadyPrice);
+                                UpdateProgressStage(
+                                    "Смартфоны",
+                                    productsInSheet.Count,
+                                    indexes.Count,
+                                    productName,
+                                    sw.Elapsed,
+                                    BuildProgressNote(null, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
+                                    oldReadyPriceForLog,
+                                    productInSheet.ReadyPrice,
+                                    productInSheet.RrcBitPrice);
                             }
                             catch (Exception ex)
                             {
@@ -3086,7 +3143,16 @@ namespace Hotline_Main_Parsing
                                 }
                             }
                             productsInSheet.Add(fallback);
-                            UpdateProgressStage("Смартфоны", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, noOffers ? "нет предложений на Hotline" : "таймаут/ошибка, оставил старую цену", oldReadyPriceForLog, fallback.ReadyPrice);
+                            UpdateProgressStage(
+                                "Смартфоны",
+                                productsInSheet.Count,
+                                indexes.Count,
+                                productName,
+                                sw.Elapsed,
+                                BuildProgressNote(noOffers ? "нет предложений на Hotline" : "таймаут/ошибка, оставил старую цену", fallback.RrcBitPriceApplied, fallback.RrcBitPrice),
+                                oldReadyPriceForLog,
+                                fallback.ReadyPrice,
+                                fallback.RrcBitPrice);
                         }
                     }
                     catch (Exception ex)
@@ -3359,7 +3425,16 @@ namespace Hotline_Main_Parsing
                             ApplyOrientirAsResultIfNeeded(skipped, useOrientirAsResult);
                             await ApplyRrcBitPriceIfNeeded(skipped, data, dicSymbols, RRCPrice);
                             productsInSheet.Add(skipped);
-                            UpdateProgressStage("Аксессуары", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, "нету в наличии", oldReadyPriceForLog, skipped.ReadyPrice);
+                            UpdateProgressStage(
+                                "Аксессуары",
+                                productsInSheet.Count,
+                                indexes.Count,
+                                productName,
+                                sw.Elapsed,
+                                BuildProgressNote("нету в наличии", skipped.RrcBitPriceApplied, skipped.RrcBitPrice),
+                                oldReadyPriceForLog,
+                                skipped.ReadyPrice,
+                                skipped.RrcBitPrice);
                             return;
                         }
 
@@ -3399,7 +3474,16 @@ namespace Hotline_Main_Parsing
                                 {
                                     await ApplyRrcBitPriceIfNeeded(productInSheet, data, dicSymbols, RRCPrice);
                                     productsInSheet.Add(productInSheet);
-                                    UpdateProgressStage("Аксессуары", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, "пропуск: нет ссылки", oldReadyPriceForLog, productInSheet.ReadyPrice);
+                                    UpdateProgressStage(
+                                        "Аксессуары",
+                                        productsInSheet.Count,
+                                        indexes.Count,
+                                        productName,
+                                        sw.Elapsed,
+                                        BuildProgressNote("пропуск: нет ссылки", productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
+                                        oldReadyPriceForLog,
+                                        productInSheet.ReadyPrice,
+                                        productInSheet.RrcBitPrice);
                                     return;
                                 }
 
@@ -3473,7 +3557,16 @@ namespace Hotline_Main_Parsing
                                 productsInSheet.Add(productInSheet);
                                 success = true;
 
-                                UpdateProgressStage("Аксессуары", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, null, oldReadyPriceForLog, productInSheet.ReadyPrice);
+                                UpdateProgressStage(
+                                    "Аксессуары",
+                                    productsInSheet.Count,
+                                    indexes.Count,
+                                    productName,
+                                    sw.Elapsed,
+                                    BuildProgressNote(null, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
+                                    oldReadyPriceForLog,
+                                    productInSheet.ReadyPrice,
+                                    productInSheet.RrcBitPrice);
                             }
                             catch (Exception ex)
                             {
@@ -3536,7 +3629,16 @@ namespace Hotline_Main_Parsing
                                 }
                             }
                             productsInSheet.Add(fallback);
-                            UpdateProgressStage("Аксессуары", productsInSheet.Count, indexes.Count, productName, sw.Elapsed, noOffers ? "нет предложений на Hotline" : "таймаут/ошибка, оставил старую цену", oldReadyPriceForLog, fallback.ReadyPrice);
+                            UpdateProgressStage(
+                                "Аксессуары",
+                                productsInSheet.Count,
+                                indexes.Count,
+                                productName,
+                                sw.Elapsed,
+                                BuildProgressNote(noOffers ? "нет предложений на Hotline" : "таймаут/ошибка, оставил старую цену", fallback.RrcBitPriceApplied, fallback.RrcBitPrice),
+                                oldReadyPriceForLog,
+                                fallback.ReadyPrice,
+                                fallback.RrcBitPrice);
                         }
                     }
                     catch (Exception ex)

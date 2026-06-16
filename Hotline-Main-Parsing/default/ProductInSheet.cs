@@ -12,6 +12,8 @@ namespace Hotline_Main_Parsing.@default
     public string Id { get; set; } = default!;
     public string Name { get; set; } = default!;
     public decimal BitPrice { get; set; }
+    public bool RrcBitPriceApplied { get; set; }
+    public decimal? RrcBitPrice { get; set; }
     public decimal Price { get; set; }
     public decimal? SpecialPrice { get; set; }
     public decimal ReadyPrice { get; set; }

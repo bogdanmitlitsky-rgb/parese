@@ -487,6 +487,19 @@
                                         </DataTemplate>
                                     </GridViewColumn.CellTemplate>
                                 </GridViewColumn>
+                                <GridViewColumn Header="РРЦ" Width="88">
+                                    <GridViewColumn.CellTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding RrcPriceText}"
+                                                       FontFamily="Consolas"
+                                                       Foreground="#7C3AED"
+                                                       FontWeight="SemiBold"
+                                                       HorizontalAlignment="Stretch"
+                                                       TextAlignment="Center"
+                                                       Margin="0" />
+                                        </DataTemplate>
+                                    </GridViewColumn.CellTemplate>
+                                </GridViewColumn>
                                 <GridViewColumn Header="Было" Width="88">
                                     <GridViewColumn.CellTemplate>
                                         <DataTemplate>
