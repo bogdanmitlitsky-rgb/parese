@@ -496,7 +496,7 @@ namespace Hotline_Main_Parsing.@default
 
             foreach (var row in values.Values)
             {
-                string id = GetCell(row, 0);
+                string id = NormalizeSheetId(GetCell(row, 0));
                 if (string.IsNullOrWhiteSpace(id))
                 {
                     continue;
@@ -506,6 +506,15 @@ namespace Hotline_Main_Parsing.@default
             }
 
             return result;
+        }
+
+        private static string NormalizeSheetId(string? value)
+        {
+            return (value ?? string.Empty)
+                .Trim()
+                .TrimStart('\'')
+                .Replace("\u00A0", string.Empty)
+                .Replace(" ", string.Empty);
         }
 
         private static object? FormatAvailabilityForBit(string? availability)
@@ -688,27 +697,25 @@ namespace Hotline_Main_Parsing.@default
             var bitSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetBitIdsOrder();
             var availabilityById = GetHotlineAvailabilityById();
+            var productsById = products
+                .GroupBy(product => NormalizeSheetId(product.Id))
+                .ToDictionary(group => group.Key, group => group.First());
             var values = new List<IList<object?>>();
             for (int i = 0; i < ids.Length; i++)
             {
                 var row = new List<object?>();
-                for (int j = 0; j < 8; j++)
-                {
-                    row.Add(null);
-                }
+                row.Add(null);
                 values.Add(row);
             }
 
             for (int i = 0; i < ids.Length; i++)
             {
-                var product = products.FirstOrDefault(p => p.Id == ids[i]);
-                if (product == null)
-                {
-                    continue;
-                }
+                string id = NormalizeSheetId(ids[i]);
 
-                var row = values[i];
-                row[0] = product.BitPrice;
+                if (productsById.TryGetValue(id, out ProductInSheet? product))
+                {
+                    values[i][0] = product.BitPrice;
+                }
             }
             var valueRange = new ValueRange();
             valueRange.Values = values;
@@ -717,7 +724,7 @@ namespace Hotline_Main_Parsing.@default
                 return;
             }
 
-            var range = $"'{bitSheet.Properties.Title}'!I2:P{ids.Length + 1}";
+            var range = $"'{bitSheet.Properties.Title}'!I2:I{ids.Length + 1}";
             var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _bitSpreadSheetId, range);
             req.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
             req.Execute();
@@ -735,7 +742,8 @@ namespace Hotline_Main_Parsing.@default
             for (int i = 0; i < bitIds.Length; i++)
             {
                 object? availabilityValue;
-                if (availabilityById.TryGetValue(bitIds[i], out string? availability))
+                string id = NormalizeSheetId(bitIds[i]);
+                if (availabilityById.TryGetValue(id, out string? availability))
                 {
                     availabilityValue = FormatAvailabilityForBit(availability);
                 }
