@@ -696,7 +696,7 @@ namespace Hotline_Main_Parsing.@default
             var spreadSheet = _sheetsService.Spreadsheets.Get(_bitSpreadSheetId).Execute();
             var bitSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetBitIdsOrder();
-            var availabilityById = GetHotlineAvailabilityById();
+            var availabilityById = TryGetHotlineAvailabilityById("Смартфоны");
             var productsById = products
                 .GroupBy(product => NormalizeSheetId(product.Id))
                 .ToDictionary(group => group.Key, group => group.First());
@@ -704,7 +704,10 @@ namespace Hotline_Main_Parsing.@default
             for (int i = 0; i < ids.Length; i++)
             {
                 var row = new List<object?>();
-                row.Add(null);
+                for (int j = 0; j < 8; j++)
+                {
+                    row.Add(null);
+                }
                 values.Add(row);
             }
 
@@ -716,6 +719,11 @@ namespace Hotline_Main_Parsing.@default
                 {
                     values[i][0] = product.BitPrice;
                 }
+
+                if (availabilityById.TryGetValue(id, out string? availability))
+                {
+                    values[i][7] = FormatAvailabilityForBit(availability);
+                }
             }
             var valueRange = new ValueRange();
             valueRange.Values = values;
@@ -724,54 +732,23 @@ namespace Hotline_Main_Parsing.@default
                 return;
             }
 
-            var range = $"'{bitSheet.Properties.Title}'!I2:I{ids.Length + 1}";
+            var range = $"'{bitSheet.Properties.Title}'!I2:P{ids.Length + 1}";
             var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _bitSpreadSheetId, range);
             req.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
             req.Execute();
-
-            UploadBitAvailability(bitSheet.Properties.Title, ids, availabilityById);
         }
 
-        private void UploadBitAvailability(string bitSheetTitle, string[] bitIds, Dictionary<string, string> availabilityById)
+        private Dictionary<string, string> TryGetHotlineAvailabilityById(string sectionName)
         {
-            var currentAvailability = _sheetsService.Spreadsheets.Values.Get(
-                _bitSpreadSheetId,
-                $"'{bitSheetTitle}'!P2:P{bitIds.Length + 1}").Execute();
-
-            var values = new List<IList<object?>>();
-            for (int i = 0; i < bitIds.Length; i++)
+            try
             {
-                object? availabilityValue;
-                string id = NormalizeSheetId(bitIds[i]);
-                if (availabilityById.TryGetValue(id, out string? availability))
-                {
-                    availabilityValue = FormatAvailabilityForBit(availability);
-                }
-                else
-                {
-                    string currentValue = currentAvailability.Values != null && currentAvailability.Values.Count > i
-                        ? GetCell(currentAvailability.Values[i], 0)
-                        : "";
-                    availabilityValue = FormatAvailabilityForBit(currentValue);
-                }
-
-                values.Add(new List<object?> { availabilityValue });
+                return GetHotlineAvailabilityById();
             }
-
-            if (values.Count == 0)
+            catch (Exception ex)
             {
-                return;
+                File.AppendAllText("CheckUploadDataToBit.txt", $"{DateTime.Now}\t{sectionName}: не удалось прочитать наличие для Bit: {ex.Message}\r\n", Encoding.UTF8);
+                return new Dictionary<string, string>();
             }
-
-            var valueRange = new ValueRange
-            {
-                Values = values
-            };
-
-            string range = $"'{bitSheetTitle}'!P2:P{bitIds.Length + 1}";
-            var req = _sheetsService.Spreadsheets.Values.Update(valueRange, _bitSpreadSheetId, range);
-            req.ValueInputOption = SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED;
-            req.Execute();
         }
 
         private void ServiceInit()
