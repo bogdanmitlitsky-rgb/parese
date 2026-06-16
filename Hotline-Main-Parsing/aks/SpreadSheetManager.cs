@@ -150,19 +150,24 @@ namespace Hotline_Main_Parsing.aks
             return percent;
         }
 
-        public void UploadDataToTables(List<ProductInSheet> products)
+        public void UploadDataToTables(List<ProductInSheet> products, Action<string>? progressLog = null)
         {
             //var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
             //bool mainWorking = Convert.ToBoolean(config["mainWorking"]);
             //bool aksWorking = Convert.ToBoolean(config["aksWorking"]);
 
-            //if (mainWorking)
-                UploadDataToHotline(products);
-            //if (aksWorking)
-                UploadDataToBit(products);
+            progressLog?.Invoke($"Аксессуары: перенос таблиц начался, товаров: {products.Count}");
+            progressLog?.Invoke("Аксессуары: перенос в рабочую Google-таблицу...");
+            UploadDataToHotline(products);
+            progressLog?.Invoke("Аксессуары: рабочая Google-таблица записана");
+
+            progressLog?.Invoke("Аксессуары: перенос в Bit (цены и наличие)...");
+            UploadDataToBit(products);
+            progressLog?.Invoke("Аксессуары: Bit записан (цены и наличие)");
+            progressLog?.Invoke("Аксессуары: перенос таблиц завершен");
         }
 
-        private async void UploadDataToHotline(List<ProductInSheet> products)
+        private void UploadDataToHotline(List<ProductInSheet> products)
         {
             var spreadSheet = _sheetsService.Spreadsheets.Get(_hotlineSpreadSheetId).Execute();
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "🎧Парсинг Хотлайн Аксы")!;

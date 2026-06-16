@@ -289,27 +289,53 @@ namespace Hotline_Main_Parsing.@default
             return percent;
         }
 
-        public void UploadDataToTables(ConcurrentBag<ProductInSheet> products)
+        public void UploadDataToTables(ConcurrentBag<ProductInSheet> products, Action<string>? progressLog = null)
         {
             var config = new ConfigurationBuilder().AddJsonFile("appsettings.json").Build();
             bool mainWorking = Convert.ToBoolean(config["mainWorking"]);
 
-            if (mainWorking)
-                UploadDataToHotline(products);
+            progressLog?.Invoke($"Смартфоны: перенос таблиц начался, товаров: {products.Count}");
 
+            if (mainWorking)
+            {
+                progressLog?.Invoke("Смартфоны: перенос в рабочую Google-таблицу...");
+                UploadDataToHotline(products);
+                progressLog?.Invoke("Смартфоны: рабочая Google-таблица записана");
+            }
+            else
+            {
+                progressLog?.Invoke("Смартфоны: рабочая Google-таблица пропущена");
+            }
+
+            progressLog?.Invoke("Смартфоны: перенос в Bit (цены и наличие)...");
             UploadDataToBit(products);
+            progressLog?.Invoke("Смартфоны: Bit записан (цены и наличие)");
 
             try
             {
+                progressLog?.Invoke("Смартфоны: перенос в KymProm...");
                 UploadDataToKymProm();
+                progressLog?.Invoke("Смартфоны: KymProm записан");
+
+                progressLog?.Invoke("Смартфоны: перенос в 1UA Prom...");
                 UploadDataTo1UaProm();
+                progressLog?.Invoke("Смартфоны: 1UA Prom записан");
+
+                progressLog?.Invoke("Смартфоны: перенос в Smile Prom...");
                 UploadDataToSmileProm();
+                progressLog?.Invoke("Смартфоны: Smile Prom записан");
+
+                progressLog?.Invoke("Смартфоны: перенос в Stok Prom...");
                 UploadDataToStokProm();
+                progressLog?.Invoke("Смартфоны: Stok Prom записан");
             }
             catch (Exception ex)
             {
+                progressLog?.Invoke($"Смартфоны: ошибка переноса Prom-таблиц: {ex.Message}");
                 File.AppendAllText("CheckUploadDataToKymProm.txt", $"{DateTime.Now.ToString()}\tMessage - {ex.Message} InnerException - {ex.InnerException} \r\n", Encoding.UTF8);
             }
+
+            progressLog?.Invoke("Смартфоны: перенос таблиц завершен");
         }
         /// <summary>
         /// 

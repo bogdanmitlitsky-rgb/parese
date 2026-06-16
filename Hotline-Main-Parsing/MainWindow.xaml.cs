@@ -3209,7 +3209,7 @@ namespace Hotline_Main_Parsing
                 }
 
                 SetStage("смартфоны: записываю результат в Google Sheets");
-                spreadSheetManager.UploadDataToTables(productsInSheet);
+                spreadSheetManager.UploadDataToTables(productsInSheet, AppendLog);
                 CompetitorHistoryStore.SaveInsights(competitorInsights);
                 AppendLog($"Смартфоны: история конкурентов обновлена, записей: {competitorInsights.Count}");
                 SetStage($"смартфоны: готово, обработано {productsInSheet.Count}");
@@ -3706,7 +3706,7 @@ namespace Hotline_Main_Parsing
                 }
 
                 SetStage("аксессуары: записываю результат в Google Sheets");
-                spreadSheetManager.UploadDataToTables(productsInSheet.ToList()); // .ToList() нужен, если метод требует List, иначе можно передавать напрямую
+                spreadSheetManager.UploadDataToTables(productsInSheet.ToList(), AppendLog); // .ToList() нужен, если метод требует List, иначе можно передавать напрямую
                 CompetitorHistoryStore.SaveInsights(competitorInsights);
                 AppendLog($"Аксессуары: история конкурентов обновлена, записей: {competitorInsights.Count}");
                 SetStage($"аксессуары: готово, обработано {productsInSheet.Count}");
