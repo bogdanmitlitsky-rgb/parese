@@ -119,6 +119,16 @@ namespace Hotline_Main_Parsing
             public string Status { get; init; } = string.Empty;
         }
 
+        private sealed class TemperatureCandidate
+        {
+            public double Celsius { get; set; }
+            public string HardwareName { get; set; } = string.Empty;
+            public string HardwareType { get; set; } = string.Empty;
+            public string SensorName { get; set; } = string.Empty;
+            public string Identifier { get; set; } = string.Empty;
+            public bool LooksLikeCpu { get; set; }
+        }
+
         private sealed class ProgressSnapshot
         {
             public string Status { get; set; } = "Ожидает запуска";
@@ -1304,7 +1314,7 @@ namespace Hotline_Main_Parsing
             }
             else
             {
-                TemperatureText.Text = IsRunningAsAdministrator() ? "н/д" : "админ?";
+                TemperatureText.Text = IsRunningAsAdministrator() ? "нет CPU" : "админ?";
                 TemperatureText.Foreground = CreateBrush("#8EA0BA");
                 TemperatureText.ToolTip = _lastTemperatureStatus;
             }
@@ -1363,16 +1373,16 @@ namespace Hotline_Main_Parsing
             Computer? computer = null;
             try
             {
-                var temperatures = new List<double>();
+                var temperatures = new List<TemperatureCandidate>();
                 computer = new Computer
                 {
                     IsCpuEnabled = true,
                     IsGpuEnabled = false,
-                    IsMotherboardEnabled = false,
+                    IsMotherboardEnabled = true,
                     IsMemoryEnabled = false,
                     IsStorageEnabled = false,
                     IsNetworkEnabled = false,
-                    IsControllerEnabled = false,
+                    IsControllerEnabled = true,
                     IsPsuEnabled = false,
                     IsBatteryEnabled = false
                 };
@@ -1380,7 +1390,10 @@ namespace Hotline_Main_Parsing
                 computer.Open();
                 foreach (IHardware hardware in computer.Hardware)
                 {
-                    if (hardware.HardwareType == HardwareType.Cpu)
+                    if (hardware.HardwareType == HardwareType.Cpu ||
+                        hardware.HardwareType == HardwareType.Motherboard ||
+                        hardware.HardwareType == HardwareType.SuperIO ||
+                        hardware.HardwareType == HardwareType.EmbeddedController)
                     {
                         ReadHardwareTemperatures(hardware, temperatures);
                     }
@@ -1388,12 +1401,19 @@ namespace Hotline_Main_Parsing
 
                 if (temperatures.Count == 0)
                 {
-                    status = $"встроенные CPU-датчики: 0 значений, устройств: {computer.Hardware.Count}";
+                    status = $"встроенные датчики: 0 температур, устройств: {computer.Hardware.Count}";
                     return null;
                 }
 
-                status = $"встроенные CPU-датчики: найдено {temperatures.Count}";
-                return temperatures.Max();
+                var cpuTemperatures = temperatures.Where(item => item.LooksLikeCpu).ToList();
+                if (cpuTemperatures.Count == 0)
+                {
+                    status = $"встроенные датчики: CPU не найден, всего температур {temperatures.Count}: {FormatTemperatureCandidates(temperatures)}";
+                    return null;
+                }
+
+                status = $"встроенные CPU-датчики: найдено {cpuTemperatures.Count}: {FormatTemperatureCandidates(cpuTemperatures)}";
+                return cpuTemperatures.Max(item => item.Celsius);
             }
             catch (Exception ex)
             {
@@ -1413,7 +1433,7 @@ namespace Hotline_Main_Parsing
             }
         }
 
-        private static void ReadHardwareTemperatures(IHardware hardware, List<double> temperatures)
+        private static void ReadHardwareTemperatures(IHardware hardware, List<TemperatureCandidate> temperatures)
         {
             hardware.Update();
             foreach (ISensor sensor in hardware.Sensors)
@@ -1423,7 +1443,17 @@ namespace Hotline_Main_Parsing
                     double celsius = sensor.Value.Value;
                     if (celsius > 0 && celsius < 130)
                     {
-                        temperatures.Add(celsius);
+                        string identifier = $"{hardware.Identifier} {sensor.Identifier}";
+                        temperatures.Add(new TemperatureCandidate
+                        {
+                            Celsius = celsius,
+                            HardwareName = hardware.Name ?? string.Empty,
+                            HardwareType = hardware.HardwareType.ToString(),
+                            SensorName = sensor.Name ?? string.Empty,
+                            Identifier = identifier,
+                            LooksLikeCpu = hardware.HardwareType == HardwareType.Cpu ||
+                                           IsCpuTemperatureSensor(sensor.Name ?? string.Empty, identifier)
+                        });
                     }
                 }
             }
@@ -1432,6 +1462,21 @@ namespace Hotline_Main_Parsing
             {
                 ReadHardwareTemperatures(subHardware, temperatures);
             }
+        }
+
+        private static string FormatTemperatureCandidates(IEnumerable<TemperatureCandidate> temperatures)
+        {
+            return string.Join(", ", temperatures
+                .OrderByDescending(item => item.LooksLikeCpu)
+                .ThenByDescending(item => item.Celsius)
+                .Take(4)
+                .Select(item =>
+                {
+                    string name = string.IsNullOrWhiteSpace(item.SensorName)
+                        ? item.HardwareName
+                        : $"{item.HardwareName} {item.SensorName}".Trim();
+                    return $"{name} {item.Celsius:0}°C";
+                }));
         }
 
         private static double? TryReadNvidiaSmiTemperatureCelsius(out string status)
