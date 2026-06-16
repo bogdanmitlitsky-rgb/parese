@@ -3626,15 +3626,13 @@ namespace Hotline_Main_Parsing
                     html = await managerHotline.LoadHtmlPage(url);
                 }
 
-                // Ждём загрузки списка предложений
-               // await managerHotline.GetActivePage().Result.WaitForSelectorAsync("div.list__item.flex.content");
-                await Task.Delay(5000);
-
-                // Извлекаем объект `window.__NUXT__`
-                var nuxtData = await managerHotline.GetActivePage().Result.EvaluateExpressionAsync<string>("JSON.stringify(window.__NUXT__)");
+                // Ждем данные Nuxt, потому что на медленном прокси страница может быть открыта,
+                // но данные товара появляются позже обычной загрузки HTML.
+                var activePage = await managerHotline.GetActivePage();
+                var nuxtData = await WaitForNuxtDataAsync(activePage, TimeSpan.FromSeconds(30));
 
                 if (string.IsNullOrEmpty(nuxtData) || nuxtData == "null")
-                    throw new InvalidOperationException("window.__NUXT__ is null — page not loaded");
+                    throw new InvalidOperationException("страница Hotline не догрузила данные товара (window.__NUXT__ is null)");
 
                 // Парсим JSON
                 JObject json = JObject.Parse(nuxtData);
@@ -3725,6 +3723,32 @@ namespace Hotline_Main_Parsing
             }
             return product;
         }
+
+        private static async Task<string?> WaitForNuxtDataAsync(PuppeteerSharp.Page page, TimeSpan timeout)
+        {
+            var deadline = DateTime.UtcNow.Add(timeout);
+
+            while (DateTime.UtcNow < deadline)
+            {
+                try
+                {
+                    var nuxtData = await page.EvaluateExpressionAsync<string>("JSON.stringify(window.__NUXT__ || null)");
+                    if (!string.IsNullOrEmpty(nuxtData) && nuxtData != "null")
+                    {
+                        return nuxtData;
+                    }
+                }
+                catch
+                {
+                    // Если страница еще навигируется или перезагружается, даем ей шанс догрузиться.
+                }
+
+                await Task.Delay(500);
+            }
+
+            return null;
+        }
+
         static void ProcessJsonItem(JToken item)
         {
             if (item["@type"]?.ToString() == "BreadcrumbList")
