@@ -12,10 +12,12 @@ namespace Hotline_Main_Parsing.common
         public string Url { get; set; }
         public decimal Price { get; set; }
         public bool IsDiscounted { get; set; }
+        public string Warranty { get; set; } = string.Empty;
 
         public override string ToString()
         {
-            return $"{Name} - {Price}";
+            var warranty = string.IsNullOrWhiteSpace(Warranty) ? string.Empty : $" ({Warranty})";
+            return $"{Name} - {Price}{warranty}";
         }
     }
 }

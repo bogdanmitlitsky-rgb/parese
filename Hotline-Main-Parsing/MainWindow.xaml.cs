@@ -712,6 +712,122 @@ namespace Hotline_Main_Parsing
             return false;
         }
 
+        private static readonly string[] WarrantyPropertyMarkers =
+        {
+            "warranty",
+            "guarantee",
+            "garant",
+            "guarant",
+            "гарант"
+        };
+
+        private static string ExtractOfferWarranty(JToken offerNode)
+        {
+            var values = new List<string>();
+            CollectWarrantyValues(offerNode, values);
+
+            return string.Join("; ", values
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(3));
+        }
+
+        private static void CollectWarrantyValues(JToken? token, List<string> values)
+        {
+            if (token == null)
+            {
+                return;
+            }
+
+            if (token is JProperty property)
+            {
+                if (IsWarrantyProperty(property.Name))
+                {
+                    CollectWarrantyText(property.Value, values);
+                }
+
+                CollectWarrantyValues(property.Value, values);
+                return;
+            }
+
+            if (token.Type == JTokenType.Object || token.Type == JTokenType.Array)
+            {
+                foreach (JToken child in token.Children())
+                {
+                    CollectWarrantyValues(child, values);
+                }
+            }
+        }
+
+        private static void CollectWarrantyText(JToken? token, List<string> values)
+        {
+            if (token == null)
+            {
+                return;
+            }
+
+            if (token is JProperty property)
+            {
+                CollectWarrantyText(property.Value, values);
+                return;
+            }
+
+            if (token.Type == JTokenType.String || token.Type == JTokenType.Integer || token.Type == JTokenType.Float)
+            {
+                string text = NormalizeWarrantyText(token.ToString());
+                if (IsUsefulWarrantyText(text))
+                {
+                    values.Add(text);
+                }
+
+                return;
+            }
+
+            if (token.Type == JTokenType.Object || token.Type == JTokenType.Array)
+            {
+                foreach (JToken child in token.Children())
+                {
+                    CollectWarrantyText(child, values);
+                }
+            }
+        }
+
+        private static bool IsWarrantyProperty(string propertyName)
+        {
+            if (string.IsNullOrWhiteSpace(propertyName))
+            {
+                return false;
+            }
+
+            return WarrantyPropertyMarkers.Any(marker => propertyName.Contains(marker, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static string NormalizeWarrantyText(string value)
+        {
+            string text = Regex.Replace(value ?? string.Empty, @"\s+", " ").Trim();
+            text = Regex.Replace(text, @"^(Гарантия|Гарантія|Warranty|Guarantee)\s*[:\-]?\s*", string.Empty, RegexOptions.IgnoreCase).Trim();
+            return text;
+        }
+
+        private static bool IsUsefulWarrantyText(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                return false;
+            }
+
+            string normalized = text.Trim();
+            if (normalized.Equals("Гарантия", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("Гарантія", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("Warranty", StringComparison.OrdinalIgnoreCase) ||
+                normalized.Equals("Guarantee", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return normalized.Length <= 120;
+        }
+
         private static void ApplyOrientirAsResultIfNeeded(DefaultSheets.ProductInSheet productInSheet, bool shouldUseOrientirAsResult)
         {
             if (!shouldUseOrientirAsResult || productInSheet.Price <= 0)
@@ -835,7 +951,7 @@ namespace Hotline_Main_Parsing
             return new SoftPriceAdjustmentResult
             {
                 Applied = true,
-                ShopName = nearestLowerCompetitor.Name,
+                ShopName = FormatShopNameWithWarranty(nearestLowerCompetitor),
                 CompetitorPrice = nearestLowerCompetitor.Price,
                 OldPrice = currentReadyPrice,
                 NewPrice = newPrice,
@@ -2014,7 +2130,7 @@ namespace Hotline_Main_Parsing
             else if (antiDumping.IsDumping)
             {
                 productStatus = "Демпинг";
-                statusDetails = $"{antiDumping.DumpingShop?.Name} ниже рынка на {antiDumping.DumpingPercent:0.##}%";
+                statusDetails = $"{FormatShopNameWithWarranty(antiDumping.DumpingShop)} ниже рынка на {antiDumping.DumpingPercent:0.##}%";
             }
             else if (ownIsHigherThanMarket)
             {
@@ -2042,17 +2158,17 @@ namespace Hotline_Main_Parsing
                 OwnRank = ownRank,
                 CompetitorsBelowOwnCount = competitorsBelowOwn,
                 CompetitorsAboveOwnCount = competitorsAboveOwn,
-                LowestShop = lowest?.Name ?? string.Empty,
+                LowestShop = FormatShopNameWithWarranty(lowest),
                 LowestPrice = lowest?.Price,
-                NearestLowerShop = nearestLower?.Name ?? string.Empty,
+                NearestLowerShop = FormatShopNameWithWarranty(nearestLower),
                 NearestLowerPrice = nearestLower?.Price,
                 NearestLowerPercent = nearestLowerPercent,
-                NearestUpperShop = nearestUpper?.Name ?? string.Empty,
+                NearestUpperShop = FormatShopNameWithWarranty(nearestUpper),
                 NearestUpperPrice = nearestUpper?.Price,
                 NearestUpperPercent = nearestUpperPercent,
-                MarketShop = market?.Name ?? string.Empty,
+                MarketShop = FormatShopNameWithWarranty(market),
                 MarketPrice = market?.Price,
-                DumpingShop = antiDumping.DumpingShop?.Name ?? string.Empty,
+                DumpingShop = FormatShopNameWithWarranty(antiDumping.DumpingShop),
                 DumpingPrice = antiDumping.DumpingShop?.Price,
                 DumpingPercent = antiDumping.IsDumping ? antiDumping.DumpingPercent : null,
                 IsDumping = antiDumping.IsDumping,
@@ -2072,7 +2188,22 @@ namespace Hotline_Main_Parsing
 
         private static string BuildCompetitorListText(IEnumerable<Shop> shops)
         {
-            return string.Join("; ", shops.Select(shop => $"{shop.Name} {shop.Price:0}"));
+            return string.Join("; ", shops.Select(shop => $"{FormatShopNameWithWarranty(shop)} {shop.Price:0}"));
+        }
+
+        private static string FormatShopNameWithWarranty(Shop? shop)
+        {
+            if (shop == null)
+            {
+                return string.Empty;
+            }
+
+            if (string.IsNullOrWhiteSpace(shop.Warranty))
+            {
+                return shop.Name;
+            }
+
+            return $"{shop.Name} ({shop.Warranty})";
         }
 
         private void SetStage(string stage)
@@ -3854,6 +3985,7 @@ namespace Hotline_Main_Parsing
                     {
                         Магазин = node!["firmTitle"]?.ToString() ?? "Неизвестный магазин",
                         Цена = node["price"]?.ToString() ?? "Нет цены",
+                        Гарантия = ExtractOfferWarranty(node!),
                         Уцененный = IsDiscountedOffer(node!)
                     })
                     .ToList();
@@ -3865,21 +3997,22 @@ namespace Hotline_Main_Parsing
                     if (offer.Уцененный)
                     {
                         product.DiscountedOffersSkipped++;
-                        Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH | пропуск: уценка");
+                        Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH | гарантия: {offer.Гарантия} | пропуск: уценка");
                         continue;
                     }
 
                     if (!TryParseSheetPrice(offer.Цена, out decimal offerPrice) || offerPrice <= 0)
                     {
-                        Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH | пропуск: цена не распознана");
+                        Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH | гарантия: {offer.Гарантия} | пропуск: цена не распознана");
                         continue;
                     }
 
-                    Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH");
+                    Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH | гарантия: {offer.Гарантия}");
                     Shop shop = new Shop();
                     shop.Name = offer.Магазин;
                     shop.Price = (int)Math.Floor(offerPrice);
                     shop.IsDiscounted = offer.Уцененный;
+                    shop.Warranty = offer.Гарантия;
 
                     product.Shops.Add(shop);
                 }
