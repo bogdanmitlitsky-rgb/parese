@@ -653,11 +653,63 @@ namespace Hotline_Main_Parsing
                 .Replace("\u00A0", " ")
                 .Replace("грн.", "", StringComparison.OrdinalIgnoreCase)
                 .Replace("грн", "", StringComparison.OrdinalIgnoreCase)
+                .Replace("₴", "")
                 .Replace(" ", "")
                 .Trim()
                 .Replace(",", ".");
 
             return decimal.TryParse(normalized, NumberStyles.Any, CultureInfo.InvariantCulture, out price);
+        }
+
+        private static readonly string[] DiscountedOfferMarkers =
+        {
+            "уцін",
+            "уцен",
+            "вітрин",
+            "витрин",
+            "б/в",
+            "б\\в",
+            "б/у",
+            "б\\у",
+            "refurb",
+            "used"
+        };
+
+        private static bool IsDiscountedOffer(JToken offerNode)
+        {
+            return TokenContainsDiscountedMarker(offerNode);
+        }
+
+        private static bool TokenContainsDiscountedMarker(JToken? token)
+        {
+            if (token == null)
+            {
+                return false;
+            }
+
+            if (token.Type == JTokenType.String)
+            {
+                string text = token.ToString();
+                return DiscountedOfferMarkers.Any(marker => text.Contains(marker, StringComparison.OrdinalIgnoreCase));
+            }
+
+            if (token is JProperty property)
+            {
+                return TokenContainsDiscountedMarker(property.Value);
+            }
+
+            if (token.Type == JTokenType.Object || token.Type == JTokenType.Array)
+            {
+                foreach (JToken child in token.Children())
+                {
+                    if (TokenContainsDiscountedMarker(child))
+                    {
+                        return true;
+                    }
+                }
+            }
+
+            return false;
         }
 
         private static void ApplyOrientirAsResultIfNeeded(DefaultSheets.ProductInSheet productInSheet, bool shouldUseOrientirAsResult)
@@ -2948,6 +3000,7 @@ namespace Hotline_Main_Parsing
                         int currentProxyIndex = Math.Max(0, proxys.IndexOf(managerHotline.proxy));
                         bool success = false;
                         bool noOffers = false;
+                        string noOffersReason = "нет предложений на Hotline";
 
                         while (!success && retrySw.Elapsed < retryTimeout && !token.IsCancellationRequested)
                         {
@@ -2995,6 +3048,11 @@ namespace Hotline_Main_Parsing
 
                                 if (product.Shops.Count == 0)
                                 {
+                                    if (product.DiscountedOffersSkipped > 0)
+                                    {
+                                        noOffersReason = $"нет нормальных предложений, уценка: {product.DiscountedOffersSkipped}";
+                                    }
+
                                     competitorInsights.Add(BuildCompetitorInsight(
                                         "Смартфоны",
                                         productId,
@@ -3067,7 +3125,7 @@ namespace Hotline_Main_Parsing
                                     indexes.Count,
                                     productName,
                                     sw.Elapsed,
-                                    BuildProgressNote(null, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
+                                    BuildProgressNote(product.DiscountedOffersSkipped > 0 ? $"уценка пропущена: {product.DiscountedOffersSkipped}" : null, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
                                     oldReadyPriceForLog,
                                     productInSheet.ReadyPrice,
                                     productInSheet.RrcBitPrice);
@@ -3149,7 +3207,7 @@ namespace Hotline_Main_Parsing
                                 indexes.Count,
                                 productName,
                                 sw.Elapsed,
-                                BuildProgressNote(noOffers ? "нет предложений на Hotline" : "таймаут/ошибка, оставил старую цену", fallback.RrcBitPriceApplied, fallback.RrcBitPrice),
+                                BuildProgressNote(noOffers ? noOffersReason : "таймаут/ошибка, оставил старую цену", fallback.RrcBitPriceApplied, fallback.RrcBitPrice),
                                 oldReadyPriceForLog,
                                 fallback.ReadyPrice,
                                 fallback.RrcBitPrice);
@@ -3444,6 +3502,7 @@ namespace Hotline_Main_Parsing
                         int currentProxyIndex = Math.Max(0, proxys.IndexOf(managerHotline.proxy));
                         bool success = false;
                         bool noOffers = false;
+                        string noOffersReason = "нет предложений на Hotline";
 
                         while (!success && retrySw.Elapsed < retryTimeout && !token.IsCancellationRequested)
                         {
@@ -3497,6 +3556,11 @@ namespace Hotline_Main_Parsing
 
                                 if (product.Shops.Count == 0)
                                 {
+                                    if (product.DiscountedOffersSkipped > 0)
+                                    {
+                                        noOffersReason = $"нет нормальных предложений, уценка: {product.DiscountedOffersSkipped}";
+                                    }
+
                                     competitorInsights.Add(BuildCompetitorInsight(
                                         "Аксессуары",
                                         productId,
@@ -3563,7 +3627,7 @@ namespace Hotline_Main_Parsing
                                     indexes.Count,
                                     productName,
                                     sw.Elapsed,
-                                    BuildProgressNote(null, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
+                                    BuildProgressNote(product.DiscountedOffersSkipped > 0 ? $"уценка пропущена: {product.DiscountedOffersSkipped}" : null, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
                                     oldReadyPriceForLog,
                                     productInSheet.ReadyPrice,
                                     productInSheet.RrcBitPrice);
@@ -3635,7 +3699,7 @@ namespace Hotline_Main_Parsing
                                 indexes.Count,
                                 productName,
                                 sw.Elapsed,
-                                BuildProgressNote(noOffers ? "нет предложений на Hotline" : "таймаут/ошибка, оставил старую цену", fallback.RrcBitPriceApplied, fallback.RrcBitPrice),
+                                BuildProgressNote(noOffers ? noOffersReason : "таймаут/ошибка, оставил старую цену", fallback.RrcBitPriceApplied, fallback.RrcBitPrice),
                                 oldReadyPriceForLog,
                                 fallback.ReadyPrice,
                                 fallback.RrcBitPrice);
@@ -3789,7 +3853,8 @@ namespace Hotline_Main_Parsing
                     .Select(node => new
                     {
                         Магазин = node!["firmTitle"]?.ToString() ?? "Неизвестный магазин",
-                        Цена = node["price"]?.ToString() ?? "Нет цены"
+                        Цена = node["price"]?.ToString() ?? "Нет цены",
+                        Уцененный = IsDiscountedOffer(node!)
                     })
                     .ToList();
 
@@ -3797,10 +3862,24 @@ namespace Hotline_Main_Parsing
                 Console.WriteLine($"🔍 Найдено магазинов: {offers.Count()}");
                 foreach (var offer in offers)
                 {
+                    if (offer.Уцененный)
+                    {
+                        product.DiscountedOffersSkipped++;
+                        Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH | пропуск: уценка");
+                        continue;
+                    }
+
+                    if (!TryParseSheetPrice(offer.Цена, out decimal offerPrice) || offerPrice <= 0)
+                    {
+                        Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH | пропуск: цена не распознана");
+                        continue;
+                    }
+
                     Console.WriteLine($"🏬 {offer.Магазин} | 💰 {offer.Цена} UAH");
                     Shop shop = new Shop();
                     shop.Name = offer.Магазин;
-                    shop.Price = (int)Math.Floor(decimal.Parse(offer.Цена));
+                    shop.Price = (int)Math.Floor(offerPrice);
+                    shop.IsDiscounted = offer.Уцененный;
 
                     product.Shops.Add(shop);
                 }
@@ -3852,7 +3931,7 @@ namespace Hotline_Main_Parsing
                 Console.WriteLine(ex.Message);
                 throw;
             }
-            if(product.Shops.Count == 0 && count < 15)
+            if(product.Shops.Count == 0 && product.DiscountedOffersSkipped == 0 && count < 15)
             {
                 count++;
                 await ChangeIP(managerHotline.changeLink);

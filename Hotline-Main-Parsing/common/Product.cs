@@ -12,6 +12,8 @@ namespace Hotline_Main_Parsing.common
 
         public bool OffersLoaded { get; set; }
 
+        public int DiscountedOffersSkipped { get; set; }
+
         public List<Shop> Shops { get; set; } = new List<Shop>();
     }
 }

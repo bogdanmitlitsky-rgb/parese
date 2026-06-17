@@ -11,6 +11,7 @@ namespace Hotline_Main_Parsing.common
         public string Name { get; set; }
         public string Url { get; set; }
         public decimal Price { get; set; }
+        public bool IsDiscounted { get; set; }
 
         public override string ToString()
         {
