@@ -2,16 +2,10 @@ namespace Hotline_Main_Parsing.common
 {
     public static class AntiDumpingService
     {
-        private static readonly HashSet<string> OwnShopNames = new(StringComparer.OrdinalIgnoreCase)
-        {
-            "TEHNO-BIT.COM.UA",
-            "1UA.IN"
-        };
-
         public static AntiDumpingResult Analyze(IEnumerable<Shop> shops, AntiDumpingSettings settings)
         {
             var ordered = shops
-                .Where(shop => shop.Price > 0)
+                .Where(shop => shop.Price > 0 && !shop.IsDiscounted)
                 .OrderBy(shop => shop.Price)
                 .ToList();
 
@@ -67,7 +61,38 @@ namespace Hotline_Main_Parsing.common
 
         public static bool IsOwnShop(string? shopName)
         {
-            return !string.IsNullOrWhiteSpace(shopName) && OwnShopNames.Contains(shopName);
+            return IsTehnoBitShop(shopName) || IsOneUaShop(shopName);
+        }
+
+        public static bool IsTehnoBitShop(string? shopName)
+        {
+            string normalized = NormalizeShopName(shopName);
+            return normalized.Contains("TEHNO-BIT.COM.UA") ||
+                   normalized.Contains("TEHNO-BIT") ||
+                   normalized.Contains("TEHNOBIT");
+        }
+
+        public static bool IsOneUaShop(string? shopName)
+        {
+            string normalized = NormalizeShopName(shopName);
+            return normalized.Contains("1UA.IN") ||
+                   normalized == "1UA";
+        }
+
+        private static string NormalizeShopName(string? shopName)
+        {
+            if (string.IsNullOrWhiteSpace(shopName))
+            {
+                return string.Empty;
+            }
+
+            return shopName
+                .Trim()
+                .ToUpperInvariant()
+                .Replace(" ", "")
+                .Replace("\t", "")
+                .Replace("\r", "")
+                .Replace("\n", "");
         }
     }
 }

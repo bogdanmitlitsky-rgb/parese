@@ -2,7 +2,9 @@
 using Google.Apis.Services;
 using Google.Apis.Sheets.v4;
 using Google.Apis.Sheets.v4.Data;
+using Hotline_Main_Parsing.common;
 using Microsoft.Extensions.Configuration;
+using System.IO;
 
 namespace Hotline_Main_Parsing.aks
 {
@@ -86,6 +88,65 @@ namespace Hotline_Main_Parsing.aks
 
             var values = _sheetsService.Spreadsheets.Values.Get(_hotlineSpreadSheetId, sheet.Properties.Title + "!A:V").Execute();
             return values;
+        }
+
+        public HashSet<string> GetDumpByLowestIds()
+        {
+            var result = DumpByLowestSettings.ReadIdsFromLocalFile();
+
+            try
+            {
+                var spreadSheet = _sheetsService.Spreadsheets.Get(_hotlineSpreadSheetId).Execute();
+                var sheet = spreadSheet.Sheets.FirstOrDefault(s => DumpByLowestSettings.IsSheetTitle(s.Properties.Title));
+                if (sheet == null)
+                {
+                    return result;
+                }
+
+                var values = _sheetsService.Spreadsheets.Values.Get(
+                    _hotlineSpreadSheetId,
+                    $"'{EscapeSheetName(sheet.Properties.Title)}'!A2:B").Execute();
+
+                result.UnionWith(DumpByLowestSettings.ReadIdsFromValueRange(values));
+            }
+            catch (Exception ex)
+            {
+                File.AppendAllText("CheckDumpByLowest.txt", $"{DateTime.Now}\tАксессуары: не удалось прочитать режим по низу: {ex.Message}\r\n");
+            }
+
+            return result;
+        }
+
+        public List<DumpByLowestProductRecord> GetProductsForDumpByLowestBase()
+        {
+            var values = GetData();
+            var products = new List<DumpByLowestProductRecord>();
+            if (values.Values == null || values.Values.Count < 3)
+            {
+                return products;
+            }
+
+            for (int i = 2; i < values.Values.Count; i++)
+            {
+                var row = values.Values[i];
+                string id = DumpByLowestSettings.NormalizeId(GetCell(row, 1));
+                string name = GetCell(row, 2);
+                if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                products.Add(new DumpByLowestProductRecord
+                {
+                    Section = "Аксессуары",
+                    Id = id,
+                    Name = name,
+                    Url = GetCell(row, 8),
+                    LastSeenUtc = DateTime.UtcNow
+                });
+            }
+
+            return products;
         }
 
         public string[] GetHotlineIdsOrder()

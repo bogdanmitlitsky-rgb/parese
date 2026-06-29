@@ -1,6 +1,7 @@
 ﻿using Google.Apis.Auth.OAuth2;
 using Google.Apis.Sheets.v4.Data;
 using Google.Apis.Sheets.v4;
+using Hotline_Main_Parsing.common;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -46,6 +47,7 @@ namespace Hotline_Main_Parsing.@default
         private readonly string _to;
         private readonly string _resultParsing;
         private readonly string _countPredloginiy;
+        private const decimal PromPriceChangeThreshold = 5m;
 
         public SpreadSheetManager(string hotlineSpreadSheetId, 
             string bitSpreadSheetId, 
@@ -102,6 +104,65 @@ namespace Hotline_Main_Parsing.@default
 
             var values = _sheetsService.Spreadsheets.Values.Get(_hotlineSpreadSheetId, sheet.Properties.Title + "!A:AA").Execute();
             return values;
+        }
+
+        public HashSet<string> GetDumpByLowestIds()
+        {
+            var result = DumpByLowestSettings.ReadIdsFromLocalFile();
+
+            try
+            {
+                var spreadSheet = _sheetsService.Spreadsheets.Get(_hotlineSpreadSheetId).Execute();
+                var sheet = spreadSheet.Sheets.FirstOrDefault(s => DumpByLowestSettings.IsSheetTitle(s.Properties.Title));
+                if (sheet == null)
+                {
+                    return result;
+                }
+
+                var values = _sheetsService.Spreadsheets.Values.Get(
+                    _hotlineSpreadSheetId,
+                    $"'{EscapeSheetName(sheet.Properties.Title)}'!A2:B").Execute();
+
+                result.UnionWith(DumpByLowestSettings.ReadIdsFromValueRange(values));
+            }
+            catch (Exception ex)
+            {
+                File.AppendAllText("CheckDumpByLowest.txt", $"{DateTime.Now}\tСмартфоны: не удалось прочитать режим по низу: {ex.Message}\r\n", Encoding.UTF8);
+            }
+
+            return result;
+        }
+
+        public List<DumpByLowestProductRecord> GetProductsForDumpByLowestBase()
+        {
+            var values = GetData();
+            var products = new List<DumpByLowestProductRecord>();
+            if (values.Values == null || values.Values.Count < 3)
+            {
+                return products;
+            }
+
+            for (int i = 2; i < values.Values.Count; i++)
+            {
+                var row = values.Values[i];
+                string id = DumpByLowestSettings.NormalizeId(GetCell(row, 1));
+                string name = GetCell(row, 2);
+                if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
+                products.Add(new DumpByLowestProductRecord
+                {
+                    Section = "Смартфоны",
+                    Id = id,
+                    Name = name,
+                    Url = GetCell(row, 8),
+                    LastSeenUtc = DateTime.UtcNow
+                });
+            }
+
+            return products;
         }
 
         public IReadOnlyList<OrientirPriceUpdate> NormalizeOrientirPricesFromOpt(decimal markupPercent = 2m)
@@ -378,6 +439,7 @@ namespace Hotline_Main_Parsing.@default
             var spreadSheet = _sheetsService.Spreadsheets.Get(_SmilePromSpreadSheetId).Execute();
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetIdsOrder("Export Products Sheet", "!Y:Y", _SmilePromSpreadSheetId);
+            var currentPrices = GetPromCurrentPrices(_SmilePromSpreadSheetId, hotlineSheet.Properties.Title, ids.Length);
             var idsEditor = GetHotlineEditorIdsOrder();
             var editorRows = idsEditor.Values ?? Array.Empty<IList<object>>();
             var values = GetListObjects(38, ids.Length);
@@ -388,7 +450,7 @@ namespace Hotline_Main_Parsing.@default
                 if (kymId == null) { continue; }
 
                 var row = values[i - 1];
-                row[8] = kymId[18].ToString();
+                SetPromPriceIfChanged(row, 8, currentPrices, i, kymId[18].ToString());
                 row[30] = kymId[19].ToString();
                 row[32] = kymId[20].ToString();
                 row[15] = "'" + kymId[22].ToString();
@@ -403,6 +465,7 @@ namespace Hotline_Main_Parsing.@default
             var spreadSheet = _sheetsService.Spreadsheets.Get(_StokPromSpreadSheetId).Execute();
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetIdsOrder("Export Products Sheet", "!AC:AC", _StokPromSpreadSheetId);
+            var currentPrices = GetPromCurrentPrices(_StokPromSpreadSheetId, hotlineSheet.Properties.Title, ids.Length);
             var idsEditor = GetHotlineEditorIdsOrder();
             var editorRows = idsEditor.Values ?? Array.Empty<IList<object>>();
             var values = GetListObjects(42, ids.Length); 
@@ -413,7 +476,7 @@ namespace Hotline_Main_Parsing.@default
                 if (kymId == null) { continue; }
 
                 var row = values[i - 1];
-                row[8] = kymId[14].ToString();
+                SetPromPriceIfChanged(row, 8, currentPrices, i, kymId[14].ToString());
                 row[34] = kymId[15].ToString();
                 //row[34] = kymId[7].ToString();
                 row[15] = "'" + kymId[22].ToString();
@@ -429,6 +492,7 @@ namespace Hotline_Main_Parsing.@default
             var spreadSheet = _sheetsService.Spreadsheets.Get(_1UaPromSpreadSheetId).Execute();
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetIdsOrder("Export Products Sheet", "!AA:AA", _1UaPromSpreadSheetId);
+            var currentPrices = GetPromCurrentPrices(_1UaPromSpreadSheetId, hotlineSheet.Properties.Title, ids.Length);
             var idsEditor = GetHotlineEditorIdsOrder();
             var editorRows = idsEditor.Values ?? Array.Empty<IList<object>>();
             var values = GetListObjects(42, ids.Length);
@@ -439,7 +503,7 @@ namespace Hotline_Main_Parsing.@default
                 if (kymId == null) { continue; }
 
                 var row = values[i - 1];
-                row[8] = kymId[5].ToString();
+                SetPromPriceIfChanged(row, 8, currentPrices, i, kymId[5].ToString());
                 row[32] =  kymId[6].ToString();
                 row[34] = kymId[7].ToString();
                 row[15] = "'" + kymId[22].ToString();   
@@ -454,6 +518,7 @@ namespace Hotline_Main_Parsing.@default
             var spreadSheet = _sheetsService.Spreadsheets.Get(_kymPromSpreadSheetId).Execute();
             var hotlineSheet = spreadSheet.Sheets.FirstOrDefault(s => s.Properties.Title == "Export Products Sheet")!;
             var ids = GetIdsOrder("Export Products Sheet", "!AB:AB", _kymPromSpreadSheetId);
+            var currentPrices = GetPromCurrentPrices(_kymPromSpreadSheetId, hotlineSheet.Properties.Title, ids.Length);
             var idsEditor = GetHotlineEditorIdsOrder();
             var editorRows = idsEditor.Values ?? Array.Empty<IList<object>>();
             var values = GetListObjects(39, ids.Length);
@@ -464,13 +529,46 @@ namespace Hotline_Main_Parsing.@default
                 if(kymId == null) { continue; }
 
                 var row = values[i-1];
-                row[8] = kymId[10].ToString();
+                SetPromPriceIfChanged(row, 8, currentPrices, i, kymId[10].ToString());
                 row[15] = "'" + kymId[22].ToString();
                 row[35] = kymId[11].ToString();
             }
 
             UploadTable(values, $"{hotlineSheet.Properties.Title}!A2:AJ{ids.Length + 1}", _kymPromSpreadSheetId, SpreadsheetsResource.ValuesResource.UpdateRequest.ValueInputOptionEnum.USERENTERED);
         }
+
+        private ValueRange GetPromCurrentPrices(string spreadsheetId, string sheetTitle, int idsLength)
+        {
+            return _sheetsService.Spreadsheets.Values.Get(
+                spreadsheetId,
+                $"'{EscapeSheetName(sheetTitle)}'!I1:I{idsLength + 1}").Execute();
+        }
+
+        private static void SetPromPriceIfChanged(IList<object> row, int targetColumnIndex, ValueRange currentPrices, int rowIndex, string? newPriceText)
+        {
+            if (!TryParsePrice(newPriceText, out decimal newPrice) || newPrice <= 0)
+            {
+                return;
+            }
+
+            if (!TryGetPromCurrentPrice(currentPrices, rowIndex, out decimal currentPrice) ||
+                Math.Abs(newPrice - currentPrice) > PromPriceChangeThreshold)
+            {
+                row[targetColumnIndex] = newPriceText;
+            }
+        }
+
+        private static bool TryGetPromCurrentPrice(ValueRange currentPrices, int rowIndex, out decimal price)
+        {
+            price = 0;
+            if (currentPrices.Values == null || currentPrices.Values.Count <= rowIndex)
+            {
+                return false;
+            }
+
+            return TryParsePrice(GetCell(currentPrices.Values[rowIndex], 0), out price) && price > 0;
+        }
+
         private Dictionary<string, int> CreateListSymbols(string[] symbols, string from, string to)
         {
             Dictionary<string, int> keyValuePairs = new Dictionary<string, int>();
@@ -647,10 +745,20 @@ namespace Hotline_Main_Parsing.@default
             "mint green", "ice blue", "ocean blue", "navy blue", "lake blue", "starlight blue",
             "aurora green", "titanium gray", "titanium grey", "dark grey", "dark gray",
             "light blue", "light green", "rose gold", "champagne gold", "silver grey",
-            "silver gray", "black", "white", "gray", "grey", "blue", "green", "red",
+            "silver gray", "desert gold", "velvet black", "jade cyan", "denim blue",
+            "mist white", "mocha brown", "olive green", "hazel green", "horizon blue",
+            "polar blue", "amber gray", "iceberg blue", "lava grey", "luna grey",
+            "dreamy purple", "jelly pink", "cloudy blue", "cloudy purple", "celestial grey",
+            "celestial gray", "moss green", "startrail black", "nebula black",
+            "sparkle black", "ripple blue", "veil white", "astral ice", "stellar shadow",
+            "black", "white", "gray", "grey", "blue", "green", "red",
             "pink", "purple", "violet", "gold", "silver", "orange", "yellow", "brown",
             "beige", "cream", "graphite", "midnight", "starlight", "titanium", "lavender",
-            "mint", "navy", "cyan", "teal", "черный", "чёрный", "белый", "серый",
+            "mint", "navy", "cyan", "teal", "desert", "velvet", "jade", "denim",
+            "mocha", "olive", "hazel", "horizon", "polar", "amber", "iceberg", "lava",
+            "luna", "dreamy", "jelly", "cloudy", "cloud", "celestial", "moss", "startrail",
+            "nebula", "sparkle", "ripple", "veil", "astral", "stellar", "mist",
+            "черный", "чёрный", "белый", "серый",
             "сірий", "голубой", "блакитний", "синий", "синій", "красный", "червоний",
             "розовый", "рожевий", "зеленый", "зелений", "фиолетовый", "фіолетовий",
             "золотой", "золотий", "серебристый", "сріблястий", "оранжевый",

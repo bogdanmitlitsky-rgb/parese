@@ -11,6 +11,8 @@ namespace Hotline_Main_Parsing.aks
     {
         public static void CalculatePrices(ProductInSheet productInSheet, List<Shop> shops, decimal rangePercent)
         {
+            shops = shops.Where(shop => !shop.IsDiscounted).ToList();
+
             decimal priceWithoutPercent = Math.Round((productInSheet.Price * (100 - rangePercent)) / 100);
             int outputPricesCount = 7;
             decimal leastPrice = 0;
@@ -39,12 +41,41 @@ namespace Hotline_Main_Parsing.aks
                 return;
             }
 
+            if (productInSheet.ParseMarkOld && productInSheet.ParseMarkNew)
+            {
+                var competitor = shopsRange.FirstOrDefault(shop =>
+                    shop.Price >= priceWithoutPercent &&
+                    !AntiDumpingService.IsOwnShop(shop.Name));
+
+                if (competitor == null)
+                {
+                    productInSheet.BitPrice = productInSheet.Price;
+                    productInSheet.ReadyPrice = productInSheet.Price;
+                    return;
+                }
+
+                decimal newPrice = competitor.Price - 1;
+                if (productInSheet.BuyPriceInGRN.HasValue && newPrice < productInSheet.BuyPriceInGRN.Value)
+                {
+                    newPrice = productInSheet.BuyPriceInGRN.Value;
+                }
+
+                if (newPrice < priceWithoutPercent)
+                {
+                    newPrice = priceWithoutPercent;
+                }
+
+                productInSheet.BitPrice = newPrice;
+                productInSheet.ReadyPrice = newPrice;
+                return;
+            }
+
             bool priceIsFromParsing = false;
             for (int priceIndex = 0; priceIndex < shopsRange.Count && priceIndex < outputPricesCount; priceIndex++)
             {
                 leastPrice = shopsRange[priceIndex].Price;
                 priceIsFromParsing = false;
-                if (shopsRange[priceIndex].Name == "TEHNO-BIT.COM.UA" || shopsRange[priceIndex].Name == "1UA.IN")
+                if (AntiDumpingService.IsOwnShop(shopsRange[priceIndex].Name))
                 {
                     continue;
                     if (shopsRange.Count > priceIndex + 1)
@@ -68,7 +99,7 @@ namespace Hotline_Main_Parsing.aks
                 {
                     if (priceWithoutPercent < leastPrice - 1 && leastPrice - 1 > productInSheet.BuyPriceInGRN.Value)
                     {
-                        if (shopsRange[priceIndex].Name == "TEHNO-BIT.COM.UA" || shopsRange[priceIndex].Name == "1UA.IN")
+                        if (AntiDumpingService.IsOwnShop(shopsRange[priceIndex].Name))
                         {
                             if (shopsRange.Count > priceIndex + 1)
                             {
@@ -104,7 +135,7 @@ namespace Hotline_Main_Parsing.aks
                 {
                     if (priceWithoutPercent < leastPrice - 1)
                     {
-                        if (shopsRange[priceIndex].Name == "TEHNO-BIT.COM.UA" || shopsRange[priceIndex].Name == "1UA.IN")
+                        if (AntiDumpingService.IsOwnShop(shopsRange[priceIndex].Name))
                         {
                             if (shopsRange.Count > priceIndex + 1)
                             {

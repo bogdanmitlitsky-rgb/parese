@@ -203,9 +203,11 @@
                                       Margin="0,0,0,10" />
                             <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="210" />
-                                    <ColumnDefinition Width="24" />
-                                    <ColumnDefinition Width="210" />
+                                    <ColumnDefinition Width="190" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="170" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="190" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel Grid.Column="0">
                                     <Label Content="Порог демпинга, %" />
@@ -216,6 +218,11 @@
                                     <Label Content="Мин. конкурентов" />
                                     <TextBox x:Name="tbAntiDumpingMinOffers"
                                              Loaded="tbAntiDumpingMinOffers_Loaded" />
+                                </StackPanel>
+                                <StackPanel Grid.Column="4">
+                                    <Label Content="Порог по низу ниже D, %" />
+                                    <TextBox x:Name="tbLowestMaxBelowOrientirPercent"
+                                             Loaded="tbLowestMaxBelowOrientirPercent_Loaded" />
                                 </StackPanel>
                             </Grid>
                         </StackPanel>

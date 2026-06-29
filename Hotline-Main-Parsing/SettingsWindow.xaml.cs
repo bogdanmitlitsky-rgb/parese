@@ -88,6 +88,11 @@ namespace Hotline_Main_Parsing
             tbAntiDumpingMinOffers.Text = GetConfigValue("AntiDumpingMinOffers", "3");
         }
 
+        private void tbLowestMaxBelowOrientirPercent_Loaded(object sender, RoutedEventArgs e)
+        {
+            tbLowestMaxBelowOrientirPercent.Text = GetConfigValue("LowestPriceMaxBelowOrientirPercent", "20");
+        }
+
         private void tbTelegramBotToken_Loaded(object sender, RoutedEventArgs e)
         {
             tbTelegramBotToken.Text = GetConfigValue("Bot_Token", "");
@@ -171,6 +176,14 @@ namespace Hotline_Main_Parsing
                 return;
             }
 
+            if (!decimal.TryParse(tbLowestMaxBelowOrientirPercent.Text.Replace(',', '.'), NumberStyles.Any, CultureInfo.InvariantCulture, out decimal lowestMaxBelowOrientirPercent) ||
+                lowestMaxBelowOrientirPercent < 0 ||
+                lowestMaxBelowOrientirPercent >= 100)
+            {
+                MessageBox.Show("Порог по низу должен быть числом от 0 до 99.", "Ошибка заполнения", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+
             SaveChangesValueInAppSettings("BrowserCount", browserCount, "int");
             SaveChangesValueInAppSettings("ThreadCount", browserCount, "int");
             SaveChangesValueInAppSettings("timeStop", tbFinishTime.Text.Trim(), "string");
@@ -179,6 +192,7 @@ namespace Hotline_Main_Parsing
             SaveChangesValueInAppSettings("AntiDumpingEnabled", cbAntiDumpingEnabled.IsChecked == true, "bool");
             SaveChangesValueInAppSettings("AntiDumpingPercent", antiDumpingPercent, "decimal");
             SaveChangesValueInAppSettings("AntiDumpingMinOffers", antiDumpingMinOffers, "int");
+            SaveChangesValueInAppSettings("LowestPriceMaxBelowOrientirPercent", lowestMaxBelowOrientirPercent, "decimal");
 
             PromptRestartAfterSave();
         }
@@ -314,6 +328,9 @@ namespace Hotline_Main_Parsing
 
         private async void btnNormalizeOrientir_Click(object sender, RoutedEventArgs e)
         {
+            btnNormalizeOrientir.IsEnabled = false;
+            try
+            {
             var mainWindow = MainWindowOwner ?? Window.GetWindow(this) as MainWindow;
             if (mainWindow != null)
             {
@@ -322,6 +339,16 @@ namespace Hotline_Main_Parsing
             else
             {
                 MessageBox.Show("Не удалось найти главное окно программы.", "Обновление D", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Не удалось обновить D по ОПТ:\n{ex.Message}", "Ошибка обновления D", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+            finally
+            {
+                btnNormalizeOrientir.IsEnabled = true;
             }
         }
 

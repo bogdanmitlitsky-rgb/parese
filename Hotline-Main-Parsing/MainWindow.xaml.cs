@@ -472,9 +472,39 @@ namespace Hotline_Main_Parsing
             window.Show();
         }
 
+        private void OpenDumpByLowest_Click(object sender, RoutedEventArgs e)
+        {
+            try
+            {
+                var window = new DumpByLowestWindow
+                {
+                    Owner = this,
+                    Topmost = Topmost
+                };
+                window.ShowDialog();
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"Ошибка открытия окна товаров по низу: {ex.Message}");
+                MessageBox.Show(
+                    $"Не удалось открыть окно товаров по низу:\n{ex.Message}",
+                    "Hotline Parser",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+
         private async void NormalizeOrientir_Click(object sender, RoutedEventArgs e)
         {
-            await StartNormalizeOrientirAsync();
+            try
+            {
+                await StartNormalizeOrientirAsync();
+            }
+            catch (Exception ex)
+            {
+                RegisterError($"Обновление D по ОПТ: {ex.Message}");
+                MessageBox.Show($"Не удалось обновить D по ОПТ:\n{ex.Message}", "Ошибка обновления D", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
 
         public async Task StartNormalizeOrientirAsync()
@@ -503,8 +533,16 @@ namespace Hotline_Main_Parsing
             }
 
             _isNormalizingOrientir = true;
-            bNormalizeOrientir.IsEnabled = false;
-            bStart.IsEnabled = false;
+            if (bNormalizeOrientir != null)
+            {
+                bNormalizeOrientir.IsEnabled = false;
+            }
+
+            if (bStart != null)
+            {
+                bStart.IsEnabled = false;
+            }
+
             SetStatus("Обновляю D", "#DBEAFE", "#1D4ED8");
             SetStage("обновляю D по ОПТ");
             AppendLog("Начал обновление D по ОПТ.");
@@ -542,8 +580,16 @@ namespace Hotline_Main_Parsing
             finally
             {
                 _isNormalizingOrientir = false;
-                bNormalizeOrientir.IsEnabled = true;
-                bStart.IsEnabled = !IsParsingActive;
+                if (bNormalizeOrientir != null)
+                {
+                    bNormalizeOrientir.IsEnabled = true;
+                }
+
+                if (bStart != null)
+                {
+                    bStart.IsEnabled = !IsParsingActive;
+                }
+
                 SetStatus("Ожидает запуска", "#FFEDD5", "#9A3412");
                 SetStage("ожидание запуска");
             }
@@ -567,6 +613,29 @@ namespace Hotline_Main_Parsing
 
             File.WriteAllText(logPath, builder.ToString(), Encoding.UTF8);
             AppendLog($"Лог обновления D: {logPath}");
+        }
+
+        private const int NoteColumnIndex = 26; // AA: "Примечание"
+        private const decimal DefaultLowestPriceMaxBelowOrientirPercent = 20m;
+
+        private static string GetRowNote(IList<object> row)
+        {
+            return GetSheetCell(row, NoteColumnIndex);
+        }
+
+        private static bool ShouldDumpByLowest(string note)
+        {
+            if (string.IsNullOrWhiteSpace(note))
+            {
+                return false;
+            }
+
+            return Regex.IsMatch(note, @"(^|[\s,;|/\\])(?:низ|низу|низом|low|lowest)([\s,;|/\\]|$)", RegexOptions.IgnoreCase);
+        }
+
+        private static bool ShouldDumpByLowestProduct(string productId, string note, IReadOnlySet<string> dumpByLowestIds)
+        {
+            return dumpByLowestIds.Contains(DumpByLowestSettings.NormalizeId(productId)) || ShouldDumpByLowest(note);
         }
 
         private static bool ShouldUseOrientirAsResult(IList<object> row)
@@ -665,14 +734,14 @@ namespace Hotline_Main_Parsing
         {
             "уцін",
             "уцен",
+            "відновлен",
+            "восстанов",
             "вітрин",
             "витрин",
             "б/в",
             "б\\в",
             "б/у",
-            "б\\у",
-            "refurb",
-            "used"
+            "б\\у"
         };
 
         private static bool IsDiscountedOffer(JToken offerNode)
@@ -850,6 +919,40 @@ namespace Hotline_Main_Parsing
             productInSheet.ReadyPrice = productInSheet.Price;
         }
 
+        private static bool HasOnlyOwnHotlineOffers(IReadOnlyList<Shop> shops)
+        {
+            var normalOffers = shops
+                .Where(shop => shop.Price > 0 && !shop.IsDiscounted)
+                .ToList();
+
+            return normalOffers.Count > 0 &&
+                   normalOffers.All(shop => AntiDumpingService.IsOwnShop(shop.Name));
+        }
+
+        private static void ApplyOrientirWhenOnlyOwnOffers(DefaultSheets.ProductInSheet productInSheet, IReadOnlyList<Shop> shops)
+        {
+            productInSheet.BitPrice = productInSheet.Price;
+            productInSheet.ReadyPrice = productInSheet.Price;
+            productInSheet.PriceRange = GetPriceRangeFromOffers(shops);
+        }
+
+        private static void ApplyOrientirWhenOnlyOwnOffers(Hotline_Main_Parsing.aks.ProductInSheet productInSheet, IReadOnlyList<Shop> shops)
+        {
+            productInSheet.BitPrice = productInSheet.Price;
+            productInSheet.ReadyPrice = productInSheet.Price;
+            productInSheet.PriceRange = GetPriceRangeFromOffers(shops);
+        }
+
+        private static decimal[] GetPriceRangeFromOffers(IReadOnlyList<Shop> shops)
+        {
+            return shops
+                .Where(shop => shop.Price > 0 && !shop.IsDiscounted)
+                .OrderBy(shop => shop.Price)
+                .Take(7)
+                .Select(shop => shop.Price)
+                .ToArray();
+        }
+
         private static SoftPriceAdjustmentResult ApplySoftCompetitorPriceDrop(DefaultSheets.ProductInSheet productInSheet, IReadOnlyList<Shop> shops, decimal rangePercent)
         {
             var result = TryCalculateSoftCompetitorPriceDrop(
@@ -892,6 +995,44 @@ namespace Hotline_Main_Parsing
             return result;
         }
 
+        private static SoftPriceAdjustmentResult ApplyLowestCompetitorPrice(DefaultSheets.ProductInSheet productInSheet, IReadOnlyList<Shop> shops, decimal maxBelowOrientirPercent)
+        {
+            var result = TryCalculateLowestCompetitorPrice(
+                productInSheet.Price,
+                productInSheet.ReadyPrice,
+                productInSheet.BuyPriceInGRN,
+                shops,
+                maxBelowOrientirPercent);
+
+            if (!result.Applied)
+            {
+                return result;
+            }
+
+            productInSheet.BitPrice = result.NewPrice;
+            productInSheet.ReadyPrice = result.NewPrice;
+            return result;
+        }
+
+        private static SoftPriceAdjustmentResult ApplyLowestCompetitorPrice(Hotline_Main_Parsing.aks.ProductInSheet productInSheet, IReadOnlyList<Shop> shops, decimal maxBelowOrientirPercent)
+        {
+            var result = TryCalculateLowestCompetitorPrice(
+                productInSheet.Price,
+                productInSheet.ReadyPrice,
+                productInSheet.BuyPriceInGRN,
+                shops,
+                maxBelowOrientirPercent);
+
+            if (!result.Applied)
+            {
+                return result;
+            }
+
+            productInSheet.BitPrice = result.NewPrice;
+            productInSheet.ReadyPrice = result.NewPrice;
+            return result;
+        }
+
         private static SoftPriceAdjustmentResult TryCalculateSoftCompetitorPriceDrop(
             decimal orientirPrice,
             decimal currentReadyPrice,
@@ -908,6 +1049,7 @@ namespace Hotline_Main_Parsing
 
             var lowerCompetitors = shops
                 .Where(shop => shop.Price > 0 &&
+                               !shop.IsDiscounted &&
                                shop.Price < currentReadyPrice &&
                                !AntiDumpingService.IsOwnShop(shop.Name))
                 .OrderByDescending(shop => shop.Price)
@@ -957,6 +1099,64 @@ namespace Hotline_Main_Parsing
                 NewPrice = newPrice,
                 GapPercent = gapPercent,
                 Reason = "конкурент ниже на 1-3%"
+            };
+        }
+
+        private static SoftPriceAdjustmentResult TryCalculateLowestCompetitorPrice(
+            decimal orientirPrice,
+            decimal currentReadyPrice,
+            decimal? buyPrice,
+            IReadOnlyList<Shop> shops,
+            decimal maxBelowOrientirPercent)
+        {
+            if (orientirPrice <= 0)
+            {
+                return SoftPriceAdjustmentResult.None("нет ориентира цены");
+            }
+
+            var lowestCompetitor = shops
+                .Where(shop => shop.Price > 0 &&
+                               !shop.IsDiscounted &&
+                               !AntiDumpingService.IsOwnShop(shop.Name))
+                .OrderBy(shop => shop.Price)
+                .FirstOrDefault();
+
+            if (lowestCompetitor == null)
+            {
+                return SoftPriceAdjustmentResult.None("конкурент для режима низ не найден");
+            }
+
+            decimal oldPrice = currentReadyPrice > 0 ? currentReadyPrice : orientirPrice;
+            decimal newPrice = Math.Round(lowestCompetitor.Price - 1m, 0, MidpointRounding.AwayFromZero);
+            decimal minByOrientir = Math.Round(orientirPrice * (100m - maxBelowOrientirPercent) / 100m, 0, MidpointRounding.AwayFromZero);
+            if (newPrice < minByOrientir)
+            {
+                return SoftPriceAdjustmentResult.None($"ниже D больше чем на {maxBelowOrientirPercent:0.##}%");
+            }
+
+            if (buyPrice.HasValue && buyPrice.Value > 0 && newPrice < buyPrice.Value)
+            {
+                return SoftPriceAdjustmentResult.None("ниже закупки");
+            }
+
+            if (newPrice <= 0)
+            {
+                return SoftPriceAdjustmentResult.None("новая цена невалидна");
+            }
+
+            decimal gapPercent = oldPrice > 0
+                ? Math.Round(Math.Abs(oldPrice - lowestCompetitor.Price) / oldPrice * 100m, 2)
+                : 0;
+
+            return new SoftPriceAdjustmentResult
+            {
+                Applied = true,
+                ShopName = FormatShopNameWithWarranty(lowestCompetitor),
+                CompetitorPrice = lowestCompetitor.Price,
+                OldPrice = oldPrice,
+                NewPrice = newPrice,
+                GapPercent = gapPercent,
+                Reason = "ручной режим: под самый низ"
             };
         }
 
@@ -2067,7 +2267,9 @@ namespace Hotline_Main_Parsing
             SoftPriceAdjustmentResult? softPriceDrop = null)
         {
             var competitors = shops
-                .Where(shop => shop.Price > 0 && !AntiDumpingService.IsOwnShop(shop.Name))
+                .Where(shop => shop.Price > 0 &&
+                               !shop.IsDiscounted &&
+                               !AntiDumpingService.IsOwnShop(shop.Name))
                 .OrderBy(shop => shop.Price)
                 .ToList();
 
@@ -2124,8 +2326,11 @@ namespace Hotline_Main_Parsing
             }
             else if (softPriceDrop?.Applied == true)
             {
-                productStatus = "Авто-снижение";
-                statusDetails = $"{softPriceDrop.ShopName} ниже на {softPriceDrop.GapPercent:0.##}%, было {softPriceDrop.OldPrice:0}, стало {softPriceDrop.NewPrice:0}";
+                bool lowestMode = softPriceDrop.Reason.Contains("самый низ", StringComparison.OrdinalIgnoreCase);
+                productStatus = lowestMode ? "По низу" : "Авто-снижение";
+                statusDetails = lowestMode
+                    ? $"под самый низ: {softPriceDrop.ShopName} {softPriceDrop.CompetitorPrice:0}, было {softPriceDrop.OldPrice:0}, стало {softPriceDrop.NewPrice:0}"
+                    : $"{softPriceDrop.ShopName} ниже на {softPriceDrop.GapPercent:0.##}%, было {softPriceDrop.OldPrice:0}, стало {softPriceDrop.NewPrice:0}";
             }
             else if (antiDumping.IsDumping)
             {
@@ -2304,6 +2509,19 @@ namespace Hotline_Main_Parsing
         private static bool GetBrowserEconomyMode(IConfiguration config)
         {
             return bool.TryParse(config["BrowserEconomyMode"], out bool enabled) && enabled;
+        }
+
+        private static decimal GetLowestMaxBelowOrientirPercent(IConfiguration config)
+        {
+            string valueText = (config["LowestPriceMaxBelowOrientirPercent"] ?? string.Empty).Replace(',', '.');
+            if (decimal.TryParse(valueText, NumberStyles.Any, CultureInfo.InvariantCulture, out decimal value) &&
+                value >= 0 &&
+                value < 100)
+            {
+                return value;
+            }
+
+            return DefaultLowestPriceMaxBelowOrientirPercent;
         }
 
         private ManagerHotline? TryCreateBrowserManager(string section, string proxy, string userAgent, string context, bool browserEconomyMode)
@@ -3006,6 +3224,7 @@ namespace Hotline_Main_Parsing
                 object _brokenLinksLock = new object();
 
                 var allData = spreadSheetManager.GetData();
+                var dumpByLowestIds = spreadSheetManager.GetDumpByLowestIds();
                 // Проверка, что в таблице есть данные для парсинга
                 if (allData.Values == null || allData.Values.Count < 3)
                 {
@@ -3013,6 +3232,11 @@ namespace Hotline_Main_Parsing
                     return stats;
                 }
                 int percent = int.Parse(allData.Values[0][11].ToString());
+                decimal lowestMaxBelowOrientirPercent = GetLowestMaxBelowOrientirPercent(config);
+                if (dumpByLowestIds.Count > 0)
+                {
+                    AppendLog($"Смартфоны: режим по низу включен для ID: {dumpByLowestIds.Count}");
+                }
 
                 var sw = new Stopwatch();
                 sw.Start();
@@ -3024,6 +3248,7 @@ namespace Hotline_Main_Parsing
                 var agent = File.ReadAllLines("agent.txt").ToList();
                 AppendLog($"Смартфоны: будет открыто браузеров: {browserCount}");
                 AppendLog($"Смартфоны: эконом-режим браузера: {(browserEconomyMode ? "включен" : "выключен")}");
+                AppendLog($"Смартфоны: порог по низу ниже D: {lowestMaxBelowOrientirPercent:0.##}%");
                 if (proxys.Count == 0 || agent.Count == 0)
                 {
                     AppendLog("Смартфоны: нет прокси или User-Agent для запуска браузера.");
@@ -3094,6 +3319,8 @@ namespace Hotline_Main_Parsing
                             return;
                         }
                         decimal? oldReadyPriceForLog = GetOldReadyPriceForLog(oldReadyPrices, productId);
+                        string rowNote = GetRowNote(data);
+                        bool dumpByLowest = ShouldDumpByLowestProduct(productId, rowNote, dumpByLowestIds);
 
                         bool useOrientirAsResult = ShouldUseOrientirAsResult(data);
 
@@ -3103,6 +3330,8 @@ namespace Hotline_Main_Parsing
                         {
                             var skipped = new Hotline_Main_Parsing.@default.ProductInSheet();
                             skipped.Id = productId;
+                            skipped.Note = rowNote;
+                            skipped.DumpByLowest = dumpByLowest;
                             skipped.PriceAvailableness = availability;
                             skipped.Url = GetHotlineUrl(data);
                             if (TryParseSheetPrice((string?)data.ElementAtOrDefault(dicSymbols[priceOrientir]), out decimal sp))
@@ -3141,6 +3370,8 @@ namespace Hotline_Main_Parsing
                             {
                                 var productInSheet = new Hotline_Main_Parsing.@default.ProductInSheet();
                                 productInSheet.Id = productId;
+                                productInSheet.Note = rowNote;
+                                productInSheet.DumpByLowest = dumpByLowest;
                                 productInSheet.PriceAvailableness = (string)data.ElementAtOrDefault(dicSymbols[RRCPrice]);
                                 productInSheet.Price = decimal.Parse(((string?)data.ElementAtOrDefault(dicSymbols[priceOrientir]) ?? "-").Replace(" грн.", "").Replace(" ", ""));
                                 // Используем старые цены как начальное значение (сохраняются если парсинг не удался)
@@ -3199,30 +3430,64 @@ namespace Hotline_Main_Parsing
                                 }
 
                                 productInSheet.OffersCount = product.Shops.Count;
-                                Shop technoBitShop = product.Shops.Find(s => s.Name == "TEHNO-BIT.COM.UA");
+                                Shop technoBitShop = product.Shops.Find(s => AntiDumpingService.IsTehnoBitShop(s.Name));
                                 productInSheet.TehnoBit = technoBitShop != null ? '+' : '-';
 
-                                Shop UA1 = product.Shops.Find(s => s.Name == "1UA.IN");
+                                Shop UA1 = product.Shops.Find(s => AntiDumpingService.IsOneUaShop(s.Name));
                                 productInSheet.Ua_1 = UA1 != null ? '+' : '-';
 
                                 var shops = product.Shops.DistinctBy(s => s.Price).ToList();
-                                if (technoBitShop != null && !shops.Any(s => s.Name == "TEHNO-BIT.COM.UA"))
+                                if (technoBitShop != null && !shops.Any(s => AntiDumpingService.IsTehnoBitShop(s.Name)))
                                 {
                                     shops.Add(technoBitShop);
                                 }
+
+                                if (UA1 != null && !shops.Any(s => AntiDumpingService.IsOneUaShop(s.Name)))
+                                {
+                                    shops.Add(UA1);
+                                }
+
                                 shops = shops.OrderBy(s => s.Price).ToList();
 
+                                bool onlyOwnOffers = HasOnlyOwnHotlineOffers(product.Shops);
                                 var antiDumping = AntiDumpingService.Analyze(shops, antiDumpingSettings);
                                 if (antiDumping.IsDumping)
                                 {
                                     AppendLog($"Антидемпинг: {productId} - игнорирую {antiDumping.DumpingShop?.Name} {antiDumping.DumpingShop?.Price:0} грн, ниже рынка на {antiDumping.DumpingPercent:0.##}%.");
                                 }
 
-                                Hotline_Main_Parsing.@default.PriceCalculator.CalculatePrices(productInSheet, antiDumping.ShopsForPrice, percent);
-                                var softPriceDrop = ApplySoftCompetitorPriceDrop(productInSheet, shops, percent);
-                                if (softPriceDrop.Applied)
+                                SoftPriceAdjustmentResult softPriceDrop;
+                                string? progressNote = null;
+                                if (onlyOwnOffers)
                                 {
-                                    AppendLog($"Автоцена: {productId} - {softPriceDrop.ShopName} ниже нас на {softPriceDrop.GapPercent:0.##}%, ставлю {softPriceDrop.NewPrice:0} грн вместо {softPriceDrop.OldPrice:0}.");
+                                    ApplyOrientirWhenOnlyOwnOffers(productInSheet, shops);
+                                    softPriceDrop = SoftPriceAdjustmentResult.None("мы одни на Hotline");
+                                    progressNote = "одни на Hotline, цена D";
+                                    AppendLog($"Смартфоны: {productId} - мы одни на Hotline, ставлю цену D: {productInSheet.Price:0} грн.");
+                                }
+                                else
+                                {
+                                    Hotline_Main_Parsing.@default.PriceCalculator.CalculatePrices(productInSheet, antiDumping.ShopsForPrice, percent);
+                                    if (productInSheet.DumpByLowest)
+                                    {
+                                        softPriceDrop = ApplyLowestCompetitorPrice(productInSheet, shops, lowestMaxBelowOrientirPercent);
+                                        if (softPriceDrop.Applied)
+                                        {
+                                            AppendLog($"Цена по низу: {productId} - {softPriceDrop.ShopName} {softPriceDrop.CompetitorPrice:0} грн, ставлю {softPriceDrop.NewPrice:0} грн.");
+                                        }
+                                        else
+                                        {
+                                            AppendLog($"Цена по низу: {productId} - пропуск: {softPriceDrop.Reason}.");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        softPriceDrop = ApplySoftCompetitorPriceDrop(productInSheet, shops, percent);
+                                        if (softPriceDrop.Applied)
+                                        {
+                                            AppendLog($"Автоцена: {productId} - {softPriceDrop.ShopName} ниже нас на {softPriceDrop.GapPercent:0.##}%, ставлю {softPriceDrop.NewPrice:0} грн вместо {softPriceDrop.OldPrice:0}.");
+                                        }
+                                    }
                                 }
 
                                 if (SwitchParseMarkOldToNewIfNeeded(productInSheet))
@@ -3256,7 +3521,7 @@ namespace Hotline_Main_Parsing
                                     indexes.Count,
                                     productName,
                                     sw.Elapsed,
-                                    BuildProgressNote(product.DiscountedOffersSkipped > 0 ? $"уценка пропущена: {product.DiscountedOffersSkipped}" : null, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
+                                    BuildProgressNote(progressNote, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
                                     oldReadyPriceForLog,
                                     productInSheet.ReadyPrice,
                                     productInSheet.RrcBitPrice);
@@ -3316,6 +3581,8 @@ namespace Hotline_Main_Parsing
                         {
                             var fallback = new Hotline_Main_Parsing.@default.ProductInSheet();
                             fallback.Id = productId;
+                            fallback.Note = rowNote;
+                            fallback.DumpByLowest = dumpByLowest;
                             fallback.PriceAvailableness = (string?)data.ElementAtOrDefault(7);
                             fallback.Url = GetHotlineUrl(data);
                             if (TryParseSheetPrice((string?)data.ElementAtOrDefault(dicSymbols[priceOrientir]), out decimal fp))
@@ -3510,12 +3777,18 @@ namespace Hotline_Main_Parsing
                 object _brokenLinksLock = new object();
 
                 var allData = spreadSheetManager.GetData();
+                var dumpByLowestIds = spreadSheetManager.GetDumpByLowestIds();
                 if (allData.Values == null || allData.Values.Count < 3)
                 {
                     AppendLog("Аксессуары: нет данных для обработки в таблице.");
                     return stats;
                 }
                 int percent = int.Parse(allData.Values[0][11].ToString());
+                decimal lowestMaxBelowOrientirPercent = GetLowestMaxBelowOrientirPercent(config);
+                if (dumpByLowestIds.Count > 0)
+                {
+                    AppendLog($"Аксессуары: режим по низу включен для ID: {dumpByLowestIds.Count}");
+                }
 
                 var sw = new Stopwatch();
                 sw.Start();
@@ -3528,6 +3801,7 @@ namespace Hotline_Main_Parsing
                 var agent = File.ReadAllLines("agent.txt").ToList();
                 AppendLog($"Аксессуары: будет открыто браузеров: {browserCount}");
                 AppendLog($"Аксессуары: эконом-режим браузера: {(browserEconomyMode ? "включен" : "выключен")}");
+                AppendLog($"Аксессуары: порог по низу ниже D: {lowestMaxBelowOrientirPercent:0.##}%");
                 if (proxys.Count == 0 || agent.Count == 0)
                 {
                     AppendLog("Аксессуары: нет прокси или User-Agent для запуска браузера.");
@@ -3596,6 +3870,8 @@ namespace Hotline_Main_Parsing
                             return;
                         }
                         decimal? oldReadyPriceForLog = GetOldReadyPriceForLog(oldReadyPricesAks, productId);
+                        string rowNote = GetRowNote(data);
+                        bool dumpByLowest = ShouldDumpByLowestProduct(productId, rowNote, dumpByLowestIds);
 
                         bool useOrientirAsResult = ShouldUseOrientirAsResult(data);
 
@@ -3605,6 +3881,8 @@ namespace Hotline_Main_Parsing
                         {
                             var skipped = new Hotline_Main_Parsing.aks.ProductInSheet();
                             skipped.Id = productId;
+                            skipped.Note = rowNote;
+                            skipped.DumpByLowest = dumpByLowest;
                             skipped.PriceAvailableness = availabilityAks;
                             skipped.Url = GetHotlineUrl(data);
                             if (TryParseSheetPrice((string?)data.ElementAtOrDefault(dicSymbols[priceOrientir]), out decimal sp))
@@ -3643,6 +3921,8 @@ namespace Hotline_Main_Parsing
                             {
                                 var productInSheet = new Hotline_Main_Parsing.aks.ProductInSheet();
                                 productInSheet.Id = productId;
+                                productInSheet.Note = rowNote;
+                                productInSheet.DumpByLowest = dumpByLowest;
 
                                 productInSheet.PriceAvailableness = (string)data.ElementAtOrDefault(dicSymbols[RRCPrice]);
                                 if (string.IsNullOrEmpty((string?)data.ElementAtOrDefault(dicSymbols[priceOrientir])))
@@ -3707,28 +3987,62 @@ namespace Hotline_Main_Parsing
                                 }
 
                                 productInSheet.OffersCount = product.Shops.Count;
-                                Shop technoBitShop = product.Shops.Find(s => s.Name == "TEHNO-BIT.COM.UA");
+                                Shop technoBitShop = product.Shops.Find(s => AntiDumpingService.IsTehnoBitShop(s.Name));
                                 productInSheet.TehnoBit = technoBitShop != null ? '+' : '-';
-                                Shop UA1 = product.Shops.Find(s => s.Name == "1UA.IN");
+                                Shop UA1 = product.Shops.Find(s => AntiDumpingService.IsOneUaShop(s.Name));
                                 productInSheet.Ua_1 = UA1 != null ? '+' : '-';
                                 var shops = product.Shops.DistinctBy(s => s.Price).ToList();
-                                if (technoBitShop != null && !shops.Any(s => s.Name == "TEHNO-BIT.COM.UA"))
+                                if (technoBitShop != null && !shops.Any(s => AntiDumpingService.IsTehnoBitShop(s.Name)))
                                 {
                                     shops.Add(technoBitShop);
                                 }
+
+                                if (UA1 != null && !shops.Any(s => AntiDumpingService.IsOneUaShop(s.Name)))
+                                {
+                                    shops.Add(UA1);
+                                }
+
                                 shops = shops.OrderBy(s => s.Price).ToList();
 
+                                bool onlyOwnOffers = HasOnlyOwnHotlineOffers(product.Shops);
                                 var antiDumping = AntiDumpingService.Analyze(shops, antiDumpingSettings);
                                 if (antiDumping.IsDumping)
                                 {
                                     AppendLog($"Антидемпинг АКС: {productId} - игнорирую {antiDumping.DumpingShop?.Name} {antiDumping.DumpingShop?.Price:0} грн, ниже рынка на {antiDumping.DumpingPercent:0.##}%.");
                                 }
 
-                                Hotline_Main_Parsing.aks.PriceCalculator.CalculatePrices(productInSheet, antiDumping.ShopsForPrice, percent);
-                                var softPriceDrop = ApplySoftCompetitorPriceDrop(productInSheet, shops, percent);
-                                if (softPriceDrop.Applied)
+                                SoftPriceAdjustmentResult softPriceDrop;
+                                string? progressNote = null;
+                                if (onlyOwnOffers)
                                 {
-                                    AppendLog($"Автоцена АКС: {productId} - {softPriceDrop.ShopName} ниже нас на {softPriceDrop.GapPercent:0.##}%, ставлю {softPriceDrop.NewPrice:0} грн вместо {softPriceDrop.OldPrice:0}.");
+                                    ApplyOrientirWhenOnlyOwnOffers(productInSheet, shops);
+                                    softPriceDrop = SoftPriceAdjustmentResult.None("мы одни на Hotline");
+                                    progressNote = "одни на Hotline, цена D";
+                                    AppendLog($"Аксессуары: {productId} - мы одни на Hotline, ставлю цену D: {productInSheet.Price:0} грн.");
+                                }
+                                else
+                                {
+                                    Hotline_Main_Parsing.aks.PriceCalculator.CalculatePrices(productInSheet, antiDumping.ShopsForPrice, percent);
+                                    if (productInSheet.DumpByLowest)
+                                    {
+                                        softPriceDrop = ApplyLowestCompetitorPrice(productInSheet, shops, lowestMaxBelowOrientirPercent);
+                                        if (softPriceDrop.Applied)
+                                        {
+                                            AppendLog($"Цена по низу АКС: {productId} - {softPriceDrop.ShopName} {softPriceDrop.CompetitorPrice:0} грн, ставлю {softPriceDrop.NewPrice:0} грн.");
+                                        }
+                                        else
+                                        {
+                                            AppendLog($"Цена по низу АКС: {productId} - пропуск: {softPriceDrop.Reason}.");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        softPriceDrop = ApplySoftCompetitorPriceDrop(productInSheet, shops, percent);
+                                        if (softPriceDrop.Applied)
+                                        {
+                                            AppendLog($"Автоцена АКС: {productId} - {softPriceDrop.ShopName} ниже нас на {softPriceDrop.GapPercent:0.##}%, ставлю {softPriceDrop.NewPrice:0} грн вместо {softPriceDrop.OldPrice:0}.");
+                                        }
+                                    }
                                 }
 
                                 if (SwitchParseMarkOldToNewIfNeeded(productInSheet))
@@ -3758,7 +4072,7 @@ namespace Hotline_Main_Parsing
                                     indexes.Count,
                                     productName,
                                     sw.Elapsed,
-                                    BuildProgressNote(product.DiscountedOffersSkipped > 0 ? $"уценка пропущена: {product.DiscountedOffersSkipped}" : null, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
+                                    BuildProgressNote(progressNote, productInSheet.RrcBitPriceApplied, productInSheet.RrcBitPrice),
                                     oldReadyPriceForLog,
                                     productInSheet.ReadyPrice,
                                     productInSheet.RrcBitPrice);
@@ -3808,6 +4122,8 @@ namespace Hotline_Main_Parsing
                         {
                             var fallback = new Hotline_Main_Parsing.aks.ProductInSheet();
                             fallback.Id = productId;
+                            fallback.Note = rowNote;
+                            fallback.DumpByLowest = dumpByLowest;
                             fallback.PriceAvailableness = (string?)data.ElementAtOrDefault(7);
                             fallback.Url = GetHotlineUrl(data);
                             if (TryParseSheetPrice((string?)data.ElementAtOrDefault(dicSymbols[priceOrientir]), out decimal fp))
@@ -3981,12 +4297,17 @@ namespace Hotline_Main_Parsing
                 var offers = offerEdges
                     .Select(edge => edge["node"])
                     .Where(node => node != null)
-                    .Select(node => new
+                    .Select(node =>
                     {
-                        Магазин = node!["firmTitle"]?.ToString() ?? "Неизвестный магазин",
-                        Цена = node["price"]?.ToString() ?? "Нет цены",
-                        Гарантия = ExtractOfferWarranty(node!),
-                        Уцененный = IsDiscountedOffer(node!)
+                        string shopName = node!["firmTitle"]?.ToString() ?? "Неизвестный магазин";
+
+                        return new
+                        {
+                            Магазин = shopName,
+                            Цена = node["price"]?.ToString() ?? "Нет цены",
+                            Гарантия = ExtractOfferWarranty(node),
+                            Уцененный = IsDiscountedOffer(node)
+                        };
                     })
                     .ToList();
 

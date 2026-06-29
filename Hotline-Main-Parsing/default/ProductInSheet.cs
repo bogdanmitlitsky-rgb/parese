@@ -28,6 +28,8 @@ namespace Hotline_Main_Parsing.@default
 
     public decimal[] PriceRange { get; set; } = new decimal[0];
     public bool ParseMarkNew { get; set; }
+    public bool DumpByLowest { get; set; }
+    public string Note { get; set; } = string.Empty;
 
     public int OffersCount { get; set; }
 

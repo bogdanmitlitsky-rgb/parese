@@ -295,6 +295,10 @@
                             Content="Конкуренты"
                             Click="OpenCompetitors_Click"
                             Margin="0,10,0,0" />
+                    <Button x:Name="bDumpByLowest"
+                            Content="Товары по низу"
+                            Click="OpenDumpByLowest_Click"
+                            Margin="0,10,0,0" />
                     <Separator Margin="0,24,0,20" Background="{StaticResource LineBrush}" />
 
                     <TextBlock Text="Режимы"

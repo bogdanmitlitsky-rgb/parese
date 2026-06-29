@@ -36,6 +36,7 @@
     <None Update="proxy_default.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="proxy_aks.txt" CopyToOutputDirectory="PreserveNewest" />
     <None Update="agent.txt" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="dump_by_lowest_ids.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

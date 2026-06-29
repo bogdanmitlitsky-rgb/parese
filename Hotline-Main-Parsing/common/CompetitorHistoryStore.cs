@@ -101,25 +101,33 @@ namespace Hotline_Main_Parsing.common
             int canRaise = latest.Count(item => item.CanRaisePrice);
             int softDrops = latest.Count(item => item.SoftPriceDropApplied);
             int withoutOffers = latest.Count(item => item.OffersCount == 0);
+            string sectionSummary = string.Join("; ", latest
+                .GroupBy(item => string.IsNullOrWhiteSpace(item.Section) ? "Без раздела" : item.Section)
+                .OrderBy(group => GetReportSectionOrder(group.Key))
+                .ThenBy(group => group.Key)
+                .Select(group => $"{group.Key}: {group.Count()}"));
 
-            var topDumping = latest
+            var topDumpingBySection = latest
                 .Where(item => item.IsDumping)
-                .OrderByDescending(item => item.DumpingPercent ?? 0)
-                .Take(5)
-                .Select(item =>
+                .GroupBy(item => string.IsNullOrWhiteSpace(item.Section) ? "Без раздела" : item.Section)
+                .OrderBy(group => GetReportSectionOrder(group.Key))
+                .ThenBy(group => group.Key)
+                .Select(group => new
                 {
-                    string productName = TrimProductName(item.ProductName);
-                    string productText = useHtmlLinks
-                        ? BuildHtmlProductLink(productName, item.HotlineUrl)
-                        : productName;
-                    string shopName = useHtmlLinks ? Html(item.DumpingShop) : item.DumpingShop;
-
-                    return $"- {productText}: {shopName} {item.DumpingPrice:0} грн, ниже рынка на {item.DumpingPercent:0.##}%";
-                });
+                    Section = group.Key,
+                    Items = group
+                        .OrderByDescending(item => item.DumpingPercent ?? 0)
+                        .Take(3)
+                        .Select(item => BuildTopDumpingLine(item, useHtmlLinks))
+                        .ToList()
+                })
+                .Where(group => group.Items.Count > 0)
+                .ToList();
 
             var builder = new StringBuilder();
             builder.AppendLine($"Утренний отчет по Hotline за {date:dd.MM.yyyy}");
             builder.AppendLine($"Товаров в обзоре: {latest.Count}");
+            builder.AppendLine($"Разделы: {sectionSummary}");
             builder.AppendLine($"Подозрение на демпинг: {dumping}");
             builder.AppendLine($"Авто-снижений 1-3%: {softDrops}");
             builder.AppendLine($"Ты выше рынка: {ownHigher}");
@@ -130,9 +138,13 @@ namespace Hotline_Main_Parsing.common
             {
                 builder.AppendLine();
                 builder.AppendLine("Топ демпинга:");
-                foreach (var line in topDumping)
+                foreach (var section in topDumpingBySection)
                 {
-                    builder.AppendLine(line);
+                    builder.AppendLine($"{section.Section}:");
+                    foreach (var line in section.Items)
+                    {
+                        builder.AppendLine(line);
+                    }
                 }
             }
 
@@ -170,6 +182,32 @@ namespace Hotline_Main_Parsing.common
             }
 
             return value.Length <= 60 ? value : value[..57] + "...";
+        }
+
+        private static string BuildTopDumpingLine(CompetitorInsight item, bool useHtmlLinks)
+        {
+            string productName = TrimProductName(item.ProductName);
+            string productText = useHtmlLinks
+                ? BuildHtmlProductLink(productName, item.HotlineUrl)
+                : productName;
+            string shopName = useHtmlLinks ? Html(item.DumpingShop) : item.DumpingShop;
+
+            return $"- {productText}: {shopName} {item.DumpingPrice:0} грн, ниже рынка на {item.DumpingPercent:0.##}%";
+        }
+
+        private static int GetReportSectionOrder(string section)
+        {
+            if (section.Contains("Смарт", StringComparison.OrdinalIgnoreCase))
+            {
+                return 0;
+            }
+
+            if (section.Contains("Акс", StringComparison.OrdinalIgnoreCase))
+            {
+                return 1;
+            }
+
+            return 2;
         }
 
         private static string BuildHtmlProductLink(string productName, string hotlineUrl)
